@@ -1,10 +1,9 @@
-﻿{
+{
   "version": 6,
   "configurePresets": [
     {
       "name": "release",
       "displayName": "x64 Release (MSVC + vcpkg)",
-      "generator": "Visual Studio 18 2026",
       "binaryDir": "${sourceDir}/build",
       "toolchainFile": "C:/vcpkg/scripts/buildsystems/vcpkg.cmake",
       "cacheVariables": {
@@ -14,7 +13,6 @@
     {
       "name": "debug",
       "displayName": "x64 Debug (MSVC + vcpkg)",
-      "generator": "Visual Studio 18 2026",
       "binaryDir": "${sourceDir}/build-debug",
       "toolchainFile": "C:/vcpkg/scripts/buildsystems/vcpkg.cmake",
       "cacheVariables": {

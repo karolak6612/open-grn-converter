@@ -1,0 +1,74 @@
+﻿name: CI Release Build & Test
+
+on:
+  push:
+    branches:
+      - '**'
+    tags:
+      - '**'
+  pull_request:
+    branches:
+      - '**'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build & Test (Windows Release)
+    runs-on: windows-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup vcpkg Binary Cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.LOCALAPPDATA }}/vcpkg/archives
+            C:/vcpkg/installed
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}
+          restore-keys: |
+            vcpkg-${{ runner.os }}-
+
+      - name: Configure CMake (Release Preset)
+        shell: pwsh
+        run: |
+          cmake --preset release
+
+      - name: Build Release Executables & Libraries
+        shell: pwsh
+        run: |
+          cmake --build --preset release --config Release --parallel
+
+      - name: Run Automated CTest Suite
+        shell: pwsh
+        run: |
+          ctest --preset release --output-on-failure
+
+      - name: Stage Release Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path dist -Force
+          Copy-Item "build/Release/grn_converter.exe" -Destination dist/
+          if (Test-Path "build/Release/glfw3.dll") {
+              Copy-Item "build/Release/glfw3.dll" -Destination dist/
+          }
+          Copy-Item "README.md" -Destination dist/
+          Copy-Item "LICENSE" -Destination dist/
+          Copy-Item "AGENTS.md" -Destination dist/
+          Get-ChildItem dist
+
+      - name: Upload Release Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: open-grn-converter-windows-x64-${{ github.sha }}
+          path: dist/
+          if-no-files-found: error
