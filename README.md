@@ -96,7 +96,7 @@ Previously, modders were forced to rely on legacy proprietary binaries or placeh
   - Fast macroblock encoding into `BLOCK_FILL`, `BLOCK_PATTERN`, and `BLOCK_RAW` with identity Huffman bundle streaming.
   - Serializes Granny 1.2b compatible 44-byte container headers and frame index tables for direct in-game execution.
 - **Verified Compatibility**:
-  - Validated across all 116 original Sacred Gold character models (`GRN_TEXTURED/GRN_ORIGINAL`), achieving **100% conversion success with 0 crashes, 0 validator errors, and 0 placeholder textures**.
+  - Validated across all 116 original Sacred Gold character models (`test_grn/GRN_ORIGINAL`), achieving **100% conversion success with 0 crashes, 0 validator errors, and 0 placeholder textures**.
 
 ---
 

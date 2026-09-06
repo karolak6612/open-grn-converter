@@ -186,15 +186,10 @@ int main() {
         return 0;
     }
 
-    // Pick test models (e.g. DRAGON_ICE.grn and SERAPHIM.grn)
+    // Select fixtures dynamically from discovered test candidates
     std::vector<fs::path> test_fixtures;
-    for (const auto& f : test_candidates) {
-        if (f.filename() == "DRAGON_ICE.grn" || f.filename() == "SERAPHIM.grn") {
-            test_fixtures.push_back(f);
-        }
-    }
-    if (test_fixtures.empty()) {
-        test_fixtures.push_back(test_candidates[0]);
+    for (size_t i = 0; i < std::min<size_t>(2, test_candidates.size()); ++i) {
+        test_fixtures.push_back(test_candidates[i]);
     }
 
     for (const auto& chosen_file : test_fixtures) {
@@ -215,6 +210,7 @@ int main() {
 
         fs::path temp_grn = fs::temp_directory_path() / ("test_viewer_" + chosen_file.filename().string());
         bool written = grn::write_grn_file(temp_grn, *reloaded_opt);
+        (void)written;
         assert(written);
 
 #ifdef _WIN32
@@ -240,6 +236,7 @@ int main() {
 
             fs::path temp_grn = fs::temp_directory_path() / ("test_viewer_" + entry.path().stem().string() + ".grn");
             bool written = grn::write_grn_file(temp_grn, *glb_model);
+            (void)written;
             assert(written);
 
 #ifdef _WIN32

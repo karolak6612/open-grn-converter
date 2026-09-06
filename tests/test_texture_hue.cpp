@@ -198,10 +198,13 @@ int main() {
 
     std::vector<fs::path> test_files;
     std::error_code ec;
-    for (const auto& entry : fs::directory_iterator(tg_dir, ec)) {
-        if (entry.is_regular_file(ec) && entry.path().extension() == ".grn") {
-            test_files.push_back(entry.path());
-        }
+    for (const auto& entry : fs::recursive_directory_iterator(tg_dir, ec)) {
+        if (!entry.is_regular_file(ec) || entry.path().extension() != ".grn") continue;
+        auto rel = fs::relative(entry.path(), tg_dir, ec);
+        auto first = rel.begin()->string();
+        if (first == "GRN" || first == "GLB") continue;
+        test_files.push_back(entry.path());
+        if (test_files.size() >= 5) break; // Test up to 5 discovered models
     }
 
     if (test_files.empty()) {

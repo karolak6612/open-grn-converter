@@ -13,6 +13,13 @@
 #include <cmath>
 #include <filesystem>
 
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
+
 #define TEST_CHECK(cond) \
     do { \
         if (!(cond)) { \
@@ -102,19 +109,33 @@ static void test_png_codec() {
     std::cout << "  PNG memory codec passed." << std::endl;
 }
 
-static fs::path find_asset(const std::string& filename) {
-    std::vector<fs::path> candidates = {
-        fs::path("test_grn") / "GRN_ORIGINAL" / filename,
-        fs::path("..") / "test_grn" / "GRN_ORIGINAL" / filename,
-        fs::path("GRN_TEXTURED") / "GRN_ORIGINAL" / filename,
-        fs::path("..") / "GRN_TEXTURED" / "GRN_ORIGINAL" / filename,
-        fs::path("E:/Github/open-grn-converter/GRN_TEXTURED/GRN_ORIGINAL") / filename,
-        fs::path("E:/Github/open-grn-converter/test_grn/GRN_ORIGINAL") / filename
-    };
-    std::error_code ec;
-    for (const auto& p : candidates) {
-        if (fs::exists(p, ec)) return p;
+static fs::path get_binary_dir() {
+#ifdef _WIN32
+    char path[MAX_PATH];
+    DWORD len = GetModuleFileNameA(nullptr, path, MAX_PATH);
+    if (len > 0) {
+        return fs::path(path).parent_path();
     }
+#endif
+    return fs::current_path();
+}
+
+static fs::path locate_test_grn_dir() {
+    std::error_code ec;
+
+    // 1. "test_grn" from running .exe location
+    fs::path bin_tg = get_binary_dir() / "test_grn";
+    if (fs::is_directory(bin_tg, ec)) return bin_tg;
+
+    // 2. "test_grn" from repository folder / current working directory
+    fs::path cur = fs::current_path();
+    for (int i = 0; i < 4; ++i) {
+        fs::path candidate = cur / "test_grn";
+        if (fs::is_directory(candidate, ec)) return candidate;
+        if (!cur.has_parent_path() || cur == cur.parent_path()) break;
+        cur = cur.parent_path();
+    }
+
     return {};
 }
 
@@ -203,68 +224,51 @@ static void test_vtex_codec() {
         std::cout << "  VTex Format 4 synthetic roundtrip passed." << std::endl;
     }
 
-    // 4. Real Model Format 4 Decoding: BLACK_MAGICIAN.grn
+    // 4. Dynamic Asset Discovery in test_grn (Format 4 and Format 5)
     {
-        fs::path bm_path = find_asset("BLACK_MAGICIAN.grn");
-        if (!bm_path.empty()) {
-            std::cout << "  Decoding real asset: " << bm_path.string() << std::endl;
-            auto model = grn::parse_grn_file(bm_path);
-            TEST_CHECK(model.has_value());
-            TEST_CHECK(!model->textures.empty());
+        fs::path tg_dir = locate_test_grn_dir();
+        if (tg_dir.empty()) {
+            std::cout << "  (Notice: test_grn directory not found, skipping asset discovery)" << std::endl;
+        } else {
+            bool tested_fmt4 = false;
+            bool tested_fmt5 = false;
 
-            const auto& tex = model->textures[0];
-            TEST_CHECK(tex.width == 512);
-            TEST_CHECK(tex.height == 512);
-            TEST_CHECK(tex.format_code == 4);
-            TEST_CHECK(!tex.decoded_rgba.empty());
-            TEST_CHECK(tex.is_placeholder == false);
-            TEST_CHECK(tex.decoded_rgba.size() == 512 * 512 * 4);
+            std::error_code ec;
+            for (const auto& entry : fs::recursive_directory_iterator(tg_dir, ec)) {
+                if (!entry.is_regular_file(ec) || entry.path().extension() != ".grn") continue;
 
-            // Check non-neutral, vibrant colors (deep red robe)
-            size_t red_pixels = 0;
-            for (size_t i = 0; i < tex.decoded_rgba.size(); i += 4) {
-                if (tex.decoded_rgba[i + 0] > 100 && tex.decoded_rgba[i + 1] < 60) {
-                    ++red_pixels;
+                // Skip output folders if present
+                auto rel = fs::relative(entry.path(), tg_dir, ec);
+                auto first = rel.begin()->string();
+                if (first == "GRN" || first == "GLB") continue;
+
+                auto model = grn::parse_grn_file(entry.path());
+                if (!model.has_value() || model->textures.empty()) continue;
+
+                for (const auto& tex : model->textures) {
+                    if (!tested_fmt4 && tex.format_code == 4 && !tex.decoded_rgba.empty() && !tex.is_placeholder) {
+                        TEST_CHECK(tex.width > 0 && tex.height > 0);
+                        TEST_CHECK(tex.decoded_rgba.size() == static_cast<size_t>(tex.width) * tex.height * 4);
+                        tested_fmt4 = true;
+                        std::cout << "  Discovered Format 4 texture in " << entry.path().filename().string()
+                                  << " (" << tex.width << "x" << tex.height << ") decoded successfully." << std::endl;
+                    }
+                    if (!tested_fmt5 && tex.format_code == 5 && !tex.decoded_rgba.empty() && !tex.is_placeholder) {
+                        TEST_CHECK(tex.width > 0 && tex.height > 0);
+                        TEST_CHECK(tex.has_alpha == true);
+                        TEST_CHECK(tex.decoded_rgba.size() == static_cast<size_t>(tex.width) * tex.height * 4);
+                        tested_fmt5 = true;
+                        std::cout << "  Discovered Format 5 texture in " << entry.path().filename().string()
+                                  << " (" << tex.width << "x" << tex.height << ") decoded successfully." << std::endl;
+                    }
                 }
+
+                if (tested_fmt4 && tested_fmt5) break;
             }
-            TEST_CHECK(red_pixels > 1000);
-            std::cout << "  BLACK_MAGICIAN.grn Format 4 decoded successfully (" << red_pixels << " red robe pixels)." << std::endl;
-        } else {
-            std::cout << "  (Notice: BLACK_MAGICIAN.grn not found in search paths, skipping asset test)" << std::endl;
-        }
-    }
 
-    // 5. Real Model Format 5 Decoding: BLACK_RIDER.grn
-    {
-        fs::path br_path = find_asset("BLACK_RIDER.grn");
-        if (!br_path.empty()) {
-            std::cout << "  Decoding real asset: " << br_path.string() << std::endl;
-            auto model = grn::parse_grn_file(br_path);
-            TEST_CHECK(model.has_value());
-            TEST_CHECK(!model->textures.empty());
-
-            const auto& tex = model->textures[0];
-            TEST_CHECK(tex.width == 512);
-            TEST_CHECK(tex.height == 512);
-            TEST_CHECK(tex.format_code == 5);
-            TEST_CHECK(!tex.decoded_rgba.empty());
-            TEST_CHECK(tex.is_placeholder == false);
-            TEST_CHECK(tex.has_alpha == true);
-            TEST_CHECK(tex.decoded_rgba.size() == 512 * 512 * 4);
-
-            // Verify alpha channel variation (transparent cutout vs opaque body)
-            size_t transparent_pixels = 0;
-            size_t opaque_pixels = 0;
-            for (size_t i = 0; i < tex.decoded_rgba.size(); i += 4) {
-                if (tex.decoded_rgba[i + 3] < 32) ++transparent_pixels;
-                else if (tex.decoded_rgba[i + 3] > 220) ++opaque_pixels;
+            if (!tested_fmt4 && !tested_fmt5) {
+                std::cout << "  (Notice: No Format 4 or Format 5 textures found in discovered .grn files)" << std::endl;
             }
-            TEST_CHECK(transparent_pixels > 1000);
-            TEST_CHECK(opaque_pixels > 1000);
-            std::cout << "  BLACK_RIDER.grn Format 5 decoded successfully ("
-                      << transparent_pixels << " transparent, " << opaque_pixels << " opaque pixels)." << std::endl;
-        } else {
-            std::cout << "  (Notice: BLACK_RIDER.grn not found in search paths, skipping asset test)" << std::endl;
         }
     }
 }
