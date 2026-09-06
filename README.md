@@ -302,6 +302,6 @@ This project is licensed under the **MIT License**. See [LICENSE](LICENSE) for d
 
 ## Disclaimer & Trademark Notice
 
-This repository is an independent, open-source experimental research and digital preservation project. It is **not** affiliated with, associated with, sponsored by, endorsed by, or in any way officially connected with original software developers, publishers, or any of their subsidiaries or affiliates.
+This repository is an independent, open-source experimental research and digital preservation project. It is **not** affiliated with, associated with, sponsored by, endorsed by, or in any way officially connected with **RAD Game Tools**, **Epic Games, Inc.**, **Ascaron Entertainment**, or any of their subsidiaries or affiliates.
 
 All trademarks, registered trademarks, service marks, trade names, and brand names referenced in this repository are the property of their respective owners. Any reference to specific third-party games, formats, engines, or company names is made solely for the purposes of identification, technical description, software interoperability, community modding, and digital game preservation.
