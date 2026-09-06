@@ -22,9 +22,6 @@ jobs:
     permissions:
       contents: write
 
-    env:
-      VCPKG_DEFAULT_BINARY_CACHE: ${{ runner.temp }}/vcpkg-cache
-
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -43,6 +40,8 @@ jobs:
 
       - name: Configure CMake (Release Preset)
         shell: pwsh
+        env:
+          VCPKG_DEFAULT_BINARY_CACHE: ${{ runner.temp }}/vcpkg-cache
         run: |
           cmake --preset release
 
@@ -88,14 +87,19 @@ jobs:
           $isTag = "${{ github.ref }}" -like "refs/tags/*"
           $tag = if ($isTag) { "${{ github.ref_name }}" } else { "latest" }
           $title = if ($isTag) { "Release ${{ github.ref_name }}" } else { "open-grn-converter (Latest Build)" }
-          $notes = "Automated continuous release of **open-grn-converter** for Windows x64.`n`n- **Commit**: `${{ github.sha }}``n- **Branch**: `${{ github.ref_name }}``n`n### How to run:`nDownload **open-grn-converter-windows-x64.zip**, extract anywhere, and launch `grn_converter.exe`."
           
-          # Delete existing release & tag if updating rolling release
+          @"
+          Automated continuous release of **open-grn-converter** for Windows x64.
+          
+          - **Commit**: `${{ github.sha }}`
+          - **Branch**: `${{ github.ref_name }}`
+          
+          ### Download:
+          Download **open-grn-converter-windows-x64.zip** below, extract anywhere, and launch **grn_converter.exe** (no console shell spawned).
+          "@ | Out-File -FilePath release_notes.md -Encoding utf8
+          
           if (-not $isTag) {
               gh release delete latest --yes --cleanup-tag 2>$null || $true
           }
           
-          gh release create $tag "dist/open-grn-converter-windows-x64.zip" "dist/grn_converter.exe" `
-              --title "$title" `
-              --notes "$notes" `
-              --latest
+          gh release create $tag "dist/open-grn-converter-windows-x64.zip" "dist/grn_converter.exe" --title $title --notes-file release_notes.md --latest
