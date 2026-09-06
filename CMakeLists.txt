@@ -117,6 +117,12 @@ target_link_libraries(grn_converter
 )
 
 if(WIN32)
+    set_target_properties(grn_converter PROPERTIES
+        WIN32_EXECUTABLE TRUE
+    )
+    if(MSVC)
+        target_link_options(grn_converter PRIVATE "/ENTRY:mainCRTStartup")
+    endif()
     target_link_libraries(grn_converter
         PRIVATE
             comdlg32

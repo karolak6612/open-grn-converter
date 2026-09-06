@@ -20,7 +20,10 @@ jobs:
     name: Build & Test (Windows Release)
     runs-on: windows-latest
     permissions:
-      contents: read
+      contents: write
+
+    env:
+      VCPKG_DEFAULT_BINARY_CACHE: ${{ runner.temp }}/vcpkg-cache
 
     steps:
       - name: Checkout Repository
@@ -28,12 +31,12 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Setup vcpkg Binary Cache
+      - name: Cache vcpkg Dependencies & Installed Tree
         uses: actions/cache@v4
         with:
           path: |
-            ${{ env.LOCALAPPDATA }}/vcpkg/archives
-            C:/vcpkg/installed
+            build/vcpkg_installed
+            ${{ runner.temp }}/vcpkg-cache
           key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}
           restore-keys: |
             vcpkg-${{ runner.os }}-
@@ -63,12 +66,36 @@ jobs:
           }
           Copy-Item "README.md" -Destination dist/
           Copy-Item "LICENSE" -Destination dist/
-          Copy-Item "AGENTS.md" -Destination dist/
+          
+          # Create zip bundle for end users (AGENTS.md excluded)
+          Compress-Archive -Path "dist/*" -DestinationPath "open-grn-converter-windows-x64.zip" -Force
+          Move-Item -Path "open-grn-converter-windows-x64.zip" -Destination "dist/" -Force
           Get-ChildItem dist
 
-      - name: Upload Release Artifact
+      - name: Upload Workflow Artifact
         uses: actions/upload-artifact@v4
         with:
           name: open-grn-converter-windows-x64-${{ github.sha }}
           path: dist/
           if-no-files-found: error
+
+      - name: Publish Automated GitHub Release
+        if: (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) && github.repository_owner == 'karolak6612'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $isTag = "${{ github.ref }}" -like "refs/tags/*"
+          $tag = if ($isTag) { "${{ github.ref_name }}" } else { "latest" }
+          $title = if ($isTag) { "Release ${{ github.ref_name }}" } else { "open-grn-converter (Latest Build)" }
+          $notes = "Automated continuous release of **open-grn-converter** for Windows x64.`n`n- **Commit**: `${{ github.sha }}``n- **Branch**: `${{ github.ref_name }}``n`n### How to run:`nDownload **open-grn-converter-windows-x64.zip**, extract anywhere, and launch `grn_converter.exe`."
+          
+          # Delete existing release & tag if updating rolling release
+          if (-not $isTag) {
+              gh release delete latest --yes --cleanup-tag 2>$null || $true
+          }
+          
+          gh release create $tag "dist/open-grn-converter-windows-x64.zip" "dist/grn_converter.exe" `
+              --title "$title" `
+              --notes "$notes" `
+              --latest
