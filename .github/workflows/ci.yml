@@ -28,20 +28,25 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Cache vcpkg Dependencies & Installed Tree
+      - name: Restore vcpkg installed tree
         uses: actions/cache@v4
         with:
-          path: |
-            build/vcpkg_installed
-            ${{ runner.temp }}/vcpkg-cache
-          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}
+          path: build/vcpkg_installed
+          key: vcpkg-installed-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}
           restore-keys: |
-            vcpkg-${{ runner.os }}-
+            vcpkg-installed-${{ runner.os }}-
+
+      - name: Export GitHub Actions Cache Credentials for vcpkg
+        uses: actions/github-script@v7
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
 
       - name: Configure CMake (Release Preset)
         shell: pwsh
         env:
-          VCPKG_DEFAULT_BINARY_CACHE: ${{ runner.temp }}/vcpkg-cache
+          VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
         run: |
           cmake --preset release
 
