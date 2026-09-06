@@ -1,0 +1,47 @@
+﻿# Build outputs
+build/
+build-*/
+/bin/
+out/
+.vs/
+.vscode/
+.idea/
+
+# CMake artifacts
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.user
+
+# Compiled binaries and libraries
+*.obj
+*.o
+*.lib
+*.a
+*.exp
+*.pdb
+*.ilk
+
+# Executables and DLLs - ignore generated outputs, preserve open-source validator
+*.dll
+*.exe
+!validator/gltf_validator.exe
+gr2_viewer.exe
+
+# vcpkg package manager cache
+vcpkg_installed/
+.vcpkg/
+
+# Logs and temporary files
+*.log
+*.tmp
+temp/
+output/
+converted/
+test_comparisons/
+
+# Local asset tests
+[Gg][Rr][Nn]_[Aa]ssets/
+test_grn/GRN_Assets/
+test_grn/GLB/
