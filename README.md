@@ -20,6 +20,9 @@
 > This repository is strictly an experimental Proof of Concept (PoC) developed with **100% AI assistance**. It is provided "as is" for educational, archival, modding, and research purposes. The code and documentation may contain errors, inaccuracies, or incomplete edge-case behavior. The authors and contributors assume **no responsibility or liability** for any issues, crashes, data loss, or inaccuracies arising from the use, testing, or modification of this project.
 
 ---
+<img width="1194" height="738" alt="obraz" src="https://github.com/user-attachments/assets/9d972cab-be1c-4e99-9c7c-a8f0ac66a84d" />
+
+---
 
 ## Features
 
