@@ -1,4 +1,4 @@
-﻿# AGENTS.md — open-grn-converter Machine & Agent Contract
+# AGENTS.md — open-grn-converter Machine & Agent Contract
 
 > Single source of truth for all autonomous AI agents (Antigravity, Claude Code, OpenCode, Codex)
 > and human developers working in `open-grn-converter`.
@@ -41,12 +41,12 @@ Before making any modifications or investigating issues, ground yourself in **ve
    - **Nothing written in documentation is evidence until re-verified.** Always re-run the specific CLI command, CTest, or validator probe to substantiate any claim.
    - Classify all conclusions strictly:
      - **Confirmed**: Backed by a runnable command or verified automated test in the current session.
-     - **Strong inference**: Consistent with format reverse-engineering and source structure, pending direct probe.
+     - **Strong inference**: Consistent with format specifications and binary container analysis, pending direct probe.
      - **Hypothesis**: Plausible explanation requiring experimental validation.
      - **Blocked**: Missing required tool, dependency, or hardware capability.
-4. **Clean-room reverse engineering**:
-   - Proprietary DLLs (`granny.dll`, `granny2.dll`), commercial game binaries (`Sacred.exe`), and proprietary viewers (`gr2_viewer.exe`) are strictly **external and read-only**. Never commit proprietary code or binaries to this repository.
-   - All parser and serializer code in `src/` must be 100% clean, independent C++20 implementations.
+4. **Independent Implementation & Clean Boundary**:
+   - External game binaries (`Sacred.exe`) and proprietary viewers (`gr2_viewer.exe`) are strictly **external and read-only**. Never commit proprietary code or binaries to this repository.
+   - All parser and serializer code in `src/` must be 100% independent C++20 implementations.
 
 ---
 
@@ -94,7 +94,7 @@ open-grn-converter/
 │   ├── codecs/                # Image & Texture Codecs
 │   │   ├── dxt_codec.h/.cpp   # DXT1 (BC1) block decode/encode with 1-bit alpha
 │   │   ├── tga_png.h/.cpp     # 32-bit TGA & PNG decode/encode via stb_image
-│   │   └── vtex_codec.h/.cpp  # Sacred VTex (Bink 1.x video container) decoder & fallback
+│   │   └── vtex_codec.h/.cpp  # Granny 1.2b compatible VTex texture decompressor & compressor
 │   ├── converter/             # Bidirectional Orchestration Pipeline
 │   │   ├── options.h          # ConversionOptions structure (scale, z-up, textures, anim)
 │   │   ├── converter.h        # High-level convert_grn_to_glb / convert_glb_to_grn API
@@ -187,8 +187,8 @@ Granny 1.2b files are relational binary containers structured as hierarchical ch
 |---|---|---|
 | `0` | `RawRGBX` | 32-bit uncompressed RGBX (8 bits/channel, opaque, 4th byte ignored) |
 | `1` | `RawRGBA` | 32-bit uncompressed RGBA (8 bits/channel, with transparency) |
-| `4` | `VTexOpaque` | Sacred Bink 1.x compressed video texture (opaque) |
-| `5` | `VTexAlpha` | Sacred Bink 1.x compressed video texture (with alpha mask) |
+| `4` | `VTexOpaque` | Granny 1.2b compatible compressed texture (opaque) |
+| `5` | `VTexAlpha` | Granny 1.2b compatible compressed texture (with alpha mask) |
 | `6` | `RawRGB24` | 24-bit uncompressed RGB (3 bytes/pixel) |
 | `7` | `ExternalRef` | String reference to external loose file (`.tga` or `.png`) |
 | `8` | `DXT1` | S3TC / BC1 4x4 block compression (64 bits per 16 pixels, 1-bit alpha) |
@@ -274,7 +274,7 @@ ctest --preset release --output-on-failure
 
 When working on tasks, follow these operational roles:
 
-1. **Researcher / Reverse Engineer**:
+1. **Researcher / Format Analyst**:
    - Inspect binary structures, chunk headers, and byte offsets.
    - Reference `grn_types.h` and verify chunk layouts against existing Granny 1.2b samples.
 2. **Core Developer**:

@@ -38,60 +38,40 @@ static void resolve_model_textures(GrnModel& model, const std::filesystem::path&
                 search_dirs.push_back(sub_path);
             }
         }
-        auto parent_dir = model_dir.parent_path();
-        if (std::filesystem::is_directory(parent_dir, ec)) {
-            for (const auto& sub : {"textures", "Textures", "TEXTURES", "maps", "Maps", "MAPS"}) {
-                auto sub_path = parent_dir / sub;
-                if (std::filesystem::is_directory(sub_path, ec)) {
-                    search_dirs.push_back(sub_path);
-                }
-            }
-        }
-    }
-
-    // Also check extracted_textures_cache in cwd or repo root
-    for (const auto& cache_cand : {
-        std::filesystem::current_path() / "extracted_textures_cache",
-        model_dir / "extracted_textures_cache",
-        model_dir.parent_path() / "extracted_textures_cache"
-    }) {
-        if (std::filesystem::is_directory(cache_cand, ec)) {
-            search_dirs.push_back(cache_cand);
-        }
-    }
-
-    // Also check test_comparisons / <model_stem>
-    std::string stem = model_path.stem().string();
-    auto test_comp = std::filesystem::current_path() / "test_comparisons" / stem;
-    if (std::filesystem::is_directory(test_comp, ec)) {
-        search_dirs.push_back(test_comp);
     }
 
     for (auto& tex : model.textures) {
-        bool needs_resolve = tex.decoded_rgba.empty() || tex.is_placeholder || (tex.format_str == "vtex");
-        if (!needs_resolve) continue;
+        // Only resolve if texture has no embedded pixel data or is flagged as placeholder
+        if (!tex.decoded_rgba.empty() && !tex.is_placeholder) continue;
 
-        std::vector<std::string> name_stems;
-        if (!tex.name.empty()) name_stems.push_back(tex.name);
-        if (!tex.file_name.empty()) {
-            std::string f_stem = std::filesystem::path(tex.file_name).stem().string();
-            if (!f_stem.empty() && f_stem != tex.name) name_stems.push_back(f_stem);
-        }
-        if (!stem.empty()) {
-            name_stems.push_back(stem);
-            if (!tex.name.empty()) name_stems.push_back(stem + "_" + tex.name);
-            name_stems.push_back(stem + "_body_original");
-            name_stems.push_back(stem + "_original");
-            name_stems.push_back(stem + "_converted");
-        }
+        std::vector<std::string> names_to_check;
+        if (!tex.file_name.empty()) names_to_check.push_back(tex.file_name);
+        if (!tex.name.empty() && tex.name != tex.file_name) names_to_check.push_back(tex.name);
 
         bool found = false;
         for (const auto& dir : search_dirs) {
-            for (const auto& n : name_stems) {
+            for (const auto& fname : names_to_check) {
+                // Direct file check
+                auto p = dir / fname;
+                if (std::filesystem::is_regular_file(p, ec)) {
+                    auto img = load_image_file(p);
+                    if (img && !img->pixels.empty()) {
+                        tex.decoded_rgba = std::move(img->pixels);
+                        tex.width = img->width;
+                        tex.height = img->height;
+                        tex.has_alpha = img->has_alpha;
+                        tex.is_placeholder = false;
+                        found = true;
+                        break;
+                    }
+                }
+
+                // Check with common texture extensions if fname has no extension or different extension
+                std::string stem = std::filesystem::path(fname).stem().string();
                 for (const auto& ext : {".png", ".tga", ".bmp", ".jpg", ".jpeg", ".PNG", ".TGA"}) {
-                    auto p = dir / (n + ext);
-                    if (std::filesystem::is_regular_file(p, ec)) {
-                        auto img = load_image_file(p);
+                    auto p_ext = dir / (stem + ext);
+                    if (std::filesystem::is_regular_file(p_ext, ec)) {
+                        auto img = load_image_file(p_ext);
                         if (img && !img->pixels.empty()) {
                             tex.decoded_rgba = std::move(img->pixels);
                             tex.width = img->width;
