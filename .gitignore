@@ -1,4 +1,4 @@
-﻿# Build outputs
+# Build outputs
 build/
 build-*/
 /bin/
@@ -45,3 +45,5 @@ test_comparisons/
 [Gg][Rr][Nn]_[Aa]ssets/
 test_grn/GRN_Assets/
 test_grn/GLB/
+GRN_TEXTURED/
+extracted_textures_cache/
