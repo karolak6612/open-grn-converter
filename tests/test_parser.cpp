@@ -63,106 +63,59 @@ static void test_parser_synthetic_model() {
     std::cout << "  GRN parser synthetic model test passed." << std::endl;
 }
 
-static void test_parser_test_data() {
-    std::filesystem::path medusa_path = "test_data/GRN/MEDUSA.GRN";
-    std::filesystem::path anim_path = "test_data/GRN/WOGG_ATTACK_STAB_A.GRN";
+static void test_parser_synthetic_animation() {
+    std::cout << "[TEST] GRN Parser with Synthetic Skeletal Animation..." << std::endl;
 
-    if (std::filesystem::exists(medusa_path)) {
-        auto medusa = grn::parse_grn_file(medusa_path);
-        assert(medusa.has_value());
-        std::cout << "  MEDUSA.GRN: bones=" << medusa->bones.size()
-                  << ", meshes=" << medusa->meshes.size()
-                  << ", textures=" << medusa->textures.size()
-                  << ", animations=" << medusa->animations.size() << std::endl;
-        if (!medusa->bones.empty()) {
-            std::cout << "    First 5 bones: ";
-            for (size_t i = 0; i < std::min(size_t(5), medusa->bones.size()); ++i) {
-                std::cout << medusa->bones[i].name << ", ";
-            }
-            std::cout << std::endl;
-        }
-        if (!medusa->animations.empty()) {
-            std::cout << "    Animation[0]: name=" << medusa->animations[0].name
-                      << ", tracks=" << medusa->animations[0].tracks.size() << std::endl;
-        }
-    }
+    grn::GrnModel original;
 
-    if (std::filesystem::exists(anim_path)) {
-        auto anim = grn::parse_grn_file(anim_path);
-        assert(anim.has_value());
-        std::cout << "  WOGG_ATTACK_STAB_A.GRN: bones=" << anim->bones.size()
-                  << ", meshes=" << anim->meshes.size()
-                  << ", textures=" << anim->textures.size()
-                  << ", animations=" << anim->animations.size() << std::endl;
-        if (!anim->animations.empty()) {
-            std::cout << "    Animation[0]: name=" << anim->animations[0].name
-                      << ", duration=" << anim->animations[0].duration
-                      << ", tracks=" << anim->animations[0].tracks.size() << std::endl;
-            if (!anim->animations[0].tracks.empty()) {
-                std::cout << "    First 5 tracks: ";
-                for (size_t i = 0; i < std::min(size_t(5), anim->animations[0].tracks.size()); ++i) {
-                    const auto& trk = anim->animations[0].tracks[i];
-                    std::cout << trk.bone_name << " (ch=" << trk.channel_id << ", f=" << trk.format
-                              << ", times=" << (trk.format == "split" ? trk.translation_times.size() : trk.times.size())
-                              << "), ";
-                }
-                std::cout << std::endl;
-            }
-        }
-    }
+    // Add bone
+    grn::GrnBone bone;
+    bone.name = "Bone_Spine";
+    bone.parent_index = -1;
+    bone.position = {0.0f, 0.0f, 0.0f};
+    bone.rotation = {0.0f, 0.0f, 0.0f, 1.0f};
+    original.bones.push_back(bone);
 
-    if (std::filesystem::exists(medusa_path) && std::filesystem::exists(anim_path)) {
-        auto medusa_opt = grn::parse_grn_file(medusa_path);
-        auto anim_opt = grn::parse_grn_file(anim_path);
-        assert(medusa_opt.has_value() && anim_opt.has_value());
+    // Add animation with a split track
+    grn::GrnAnimation anim;
+    anim.name = "Synthetic_Action";
+    anim.duration = 1.0f;
 
-        size_t match_by_name = 0;
-        size_t match_by_ch = 0;
-        std::unordered_set<std::string> medusa_bone_names;
-        for (const auto& b : medusa_opt->bones) {
-            medusa_bone_names.insert(b.name);
-        }
+    grn::AnimTrack track;
+    track.bone_name = "Bone_Spine";
+    track.channel_id = 1;
+    track.format = "split";
+    track.translation_times = {0.0f, 0.5f, 1.0f};
+    track.translations = {{0.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f, 0.0f}};
+    track.rotation_times = {0.0f, 1.0f};
+    track.rotations = {{0.0f, 0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 0.707f, 0.707f}};
 
-        if (!anim_opt->animations.empty()) {
-            for (const auto& trk : anim_opt->animations[0].tracks) {
-                if (medusa_bone_names.count(trk.bone_name)) {
-                    match_by_name++;
-                }
-                if (trk.channel_id > 0 && static_cast<size_t>(trk.channel_id - 1) < medusa_opt->bones.size()) {
-                    match_by_ch++;
-                }
-            }
-        }
-        if (!anim_opt->animations.empty()) {
-            std::cout << "    Searching for tail tracks in WOGG:" << std::endl;
-            for (const auto& trk : anim_opt->animations[0].tracks) {
-                if (trk.bone_name == "Dummy01" || trk.bone_name == "Bone01" || trk.bone_name == "Bone02" || trk.bone_name == "Root") {
-                    std::cout << "      Found track: name='" << trk.bone_name << "', ch=" << trk.channel_id << std::endl;
-                }
-            }
-        }
+    anim.tracks.push_back(std::move(track));
+    original.animations.push_back(std::move(anim));
 
-        // Replace/add anim to medusa
-        medusa_opt->animations.clear();
-        for (auto& a : anim_opt->animations) {
-            a.name = "Attack_Stab";
-            medusa_opt->animations.push_back(a);
-        }
+    // Serialize
+    auto bytes = grn::write_grn_memory(original);
+    assert(!bytes.empty());
 
-        grn::GlbExportOptions exp_opt;
-        exp_opt.embed_textures = true;
-        std::filesystem::path out_glb = std::filesystem::temp_directory_path() / "test_medusa_anim.glb";
-        bool ok = grn::export_grn_to_glb_file(out_glb, *medusa_opt, exp_opt);
-        std::cout << "  Exported medusa with animation to GLB: " << (ok ? "SUCCESS" : "FAILED") << std::endl;
-        std::error_code ec;
-        std::filesystem::remove(out_glb, ec);
-    }
+    // Parse back
+    auto parsed = grn::parse_grn_memory(bytes.data(), bytes.size());
+    assert(parsed.has_value());
+    assert(parsed->bones.size() == 1);
+    assert(parsed->bones[0].name == "Bone_Spine");
+    assert(parsed->animations.size() == 1);
+    assert(parsed->animations[0].name == "Synthetic_Action");
+    assert(parsed->animations[0].tracks.size() == 1);
+    assert(parsed->animations[0].tracks[0].bone_name == "Bone_Spine");
+    assert(parsed->animations[0].tracks[0].translations.size() == 3);
+    assert(parsed->animations[0].tracks[0].rotations.size() == 2);
+
+    std::cout << "  GRN parser synthetic animation test passed." << std::endl;
 }
 
 int main() {
     std::cout << "=== Running Parser Unit Tests ===" << std::endl;
     test_parser_synthetic_model();
-    test_parser_test_data();
+    test_parser_synthetic_animation();
     std::cout << "All parser tests passed successfully." << std::endl;
     return 0;
 }
