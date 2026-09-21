@@ -99,6 +99,64 @@ std::optional<std::string> open_file_dialog(const char* filter, const char* titl
     return result;
 }
 
+std::vector<std::string> open_multiple_files_dialog(const char* filter, const char* title) {
+    (void)filter;
+    HRESULT hr_com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+    bool need_uninit = SUCCEEDED(hr_com) && (hr_com != S_FALSE);
+
+    std::vector<std::string> results;
+    IFileOpenDialog* pFileOpen = nullptr;
+
+    HRESULT hr = CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_ALL,
+                                  IID_IFileOpenDialog, reinterpret_cast<void**>(&pFileOpen));
+
+    if (SUCCEEDED(hr) && pFileOpen) {
+        DWORD dwOptions = 0;
+        if (SUCCEEDED(pFileOpen->GetOptions(&dwOptions))) {
+            pFileOpen->SetOptions(dwOptions | FOS_FORCEFILESYSTEM | FOS_FILEMUSTEXIST | FOS_PATHMUSTEXIST | FOS_ALLOWMULTISELECT);
+        }
+
+        if (title && *title) {
+            std::wstring wtitle = to_wstring(title);
+            pFileOpen->SetTitle(wtitle.c_str());
+        }
+
+        COMDLG_FILTERSPEC animTypes[] = {
+            { L"GRN Animation Tracks (*.grn)", L"*.grn" },
+            { L"All Files (*.*)", L"*.*" }
+        };
+        pFileOpen->SetFileTypes(ARRAYSIZE(animTypes), animTypes);
+
+        if (SUCCEEDED(pFileOpen->Show(nullptr))) {
+            IShellItemArray* pItems = nullptr;
+            if (SUCCEEDED(pFileOpen->GetResults(&pItems)) && pItems) {
+                DWORD count = 0;
+                if (SUCCEEDED(pItems->GetCount(&count))) {
+                    for (DWORD i = 0; i < count; ++i) {
+                        IShellItem* pItem = nullptr;
+                        if (SUCCEEDED(pItems->GetItemAt(i, &pItem)) && pItem) {
+                            PWSTR pszFilePath = nullptr;
+                            if (SUCCEEDED(pItem->GetDisplayName(SIGDN_FILESYSPATH, &pszFilePath)) && pszFilePath) {
+                                results.push_back(to_utf8(pszFilePath));
+                                CoTaskMemFree(pszFilePath);
+                            }
+                            pItem->Release();
+                        }
+                    }
+                }
+                pItems->Release();
+            }
+        }
+        pFileOpen->Release();
+    }
+
+    if (need_uninit) {
+        CoUninitialize();
+    }
+
+    return results;
+}
+
 std::optional<std::string> open_folder_dialog(const char* title) {
     HRESULT hr_com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
     bool need_uninit = SUCCEEDED(hr_com) && (hr_com != S_FALSE);

@@ -6,6 +6,7 @@
 #include "app.h"
 #include "embedded_icon.h"
 #include "../codecs/tga_png.h"
+#include "../core/grn_parser.h"
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 #include <imgui.h>
@@ -178,12 +179,65 @@ bool App::init_window() {
 }
 
 void App::drop_callback(GLFWwindow* window, int count, const char** paths) {
-    if (count > 0 && paths && paths[0]) {
-        auto* app = static_cast<App*>(glfwGetWindowUserPointer(window));
-        if (app) {
-            app->get_panels().set_input_path(paths[0]);
-            app->get_panels().add_log(std::string("Dropped path: ") + paths[0], LogEntry::Level::Info);
+    if (count <= 0 || !paths) return;
+    auto* app = static_cast<App*>(glfwGetWindowUserPointer(window));
+    if (!app) return;
+
+    std::vector<std::string> anim_candidates;
+    std::string new_input;
+    bool already_has_input = app->get_panels().has_input_path();
+
+    std::vector<std::string> grn_model_candidates;
+    std::vector<std::string> grn_anim_candidates;
+
+    for (int i = 0; i < count; ++i) {
+        if (!paths[i]) continue;
+        std::filesystem::path p(paths[i]);
+        std::string ext = p.extension().string();
+        for (auto& c : ext) c = static_cast<char>(std::tolower(c));
+
+        if (std::filesystem::is_directory(p) || ext == ".glb" || ext == ".gltf") {
+            if (new_input.empty()) {
+                new_input = paths[i];
+            }
+        } else if (ext == ".grn") {
+            // Check if file has meshes vs animation-only
+            auto model_opt = parse_grn_file(p);
+            if (model_opt && !model_opt->meshes.empty()) {
+                grn_model_candidates.push_back(paths[i]);
+            } else {
+                grn_anim_candidates.push_back(paths[i]);
+            }
         }
+    }
+
+    if (!already_has_input && new_input.empty()) {
+        if (!grn_model_candidates.empty()) {
+            new_input = grn_model_candidates.front();
+            for (size_t i = 1; i < grn_model_candidates.size(); ++i) {
+                anim_candidates.push_back(grn_model_candidates[i]);
+            }
+            for (const auto& a : grn_anim_candidates) {
+                anim_candidates.push_back(a);
+            }
+        } else if (!grn_anim_candidates.empty()) {
+            // Only animation files were dropped with no model set yet
+            new_input = grn_anim_candidates.front();
+            for (size_t i = 1; i < grn_anim_candidates.size(); ++i) {
+                anim_candidates.push_back(grn_anim_candidates[i]);
+            }
+        }
+    } else {
+        for (const auto& m : grn_model_candidates) anim_candidates.push_back(m);
+        for (const auto& a : grn_anim_candidates) anim_candidates.push_back(a);
+    }
+
+    if (!new_input.empty()) {
+        app->get_panels().set_input_path(new_input);
+        app->get_panels().add_log("Set input path: " + new_input, LogEntry::Level::Info);
+    }
+    if (!anim_candidates.empty()) {
+        app->get_panels().add_animation_paths(anim_candidates);
     }
 }
 

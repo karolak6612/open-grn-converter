@@ -29,11 +29,20 @@ public:
     // Sets input path (e.g. from drag-and-drop or file dialog)
     void set_input_path(const std::string& path);
 
+    // Checks if an input path is currently populated
+    bool has_input_path() const { return input_path_buf[0] != '\0'; }
+    std::string get_input_path() const { return input_path_buf; }
+
+    // Adds animation paths (e.g. from drag-and-drop or file dialog)
+    void add_animation_paths(const std::vector<std::string>& paths);
+    void clear_animation_paths() { anim_paths.clear(); }
+    const std::vector<std::string>& get_animation_paths() const { return anim_paths; }
+
 private:
     bool is_batch_mode = false;
     char input_path_buf[1024] = {};
     char output_path_buf[1024] = {};
-    char anim_path_buf[1024] = {};
+    std::vector<std::string> anim_paths;
 
     ConversionOptions options;
     int direction_item = 0; // 0=Auto, 1=GRN->GLB, 2=GLB->GRN
@@ -41,6 +50,7 @@ private:
     int scale_mode = 0; // 0=Multiplier, 1=Target Height
     float scale_factor = 1.0f;
     float target_height = 0.0f;
+    bool split_animations = true;
 
     float current_progress = 0.0f;
     std::string status_text = "Ready";

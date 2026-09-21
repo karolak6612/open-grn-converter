@@ -32,7 +32,9 @@ struct ConversionOptions {
     bool y_up = true;                 /**< Convert coordinate systems between Z-up (GRN) and Y-up (glTF). */
     float scale = 1.0f;               /**< Uniform scale factor applied during conversion. */
     float target_height = 0.0f;       /**< Optional target height in game units (auto-calculates scale). */
-    std::filesystem::path anim_file;  /**< Optional path to external animation track to combine with model. */
+    std::filesystem::path anim_file;  /**< Optional path to external animation track to combine with model (backwards compat). */
+    std::vector<std::filesystem::path> anim_files; /**< Optional list of external animation tracks (.grn) to merge into model. */
+    bool split_animations = true;     /**< When converting GLB to GRN, split animations into separate .grn files. */
     std::filesystem::path textures_dir; /**< Optional search directory for loose or pre-extracted textures. */
     std::filesystem::path output_path;/**< Optional explicit output path or directory. */
 };

@@ -21,7 +21,9 @@ static void print_help() {
               << "  --texture-format <fmt>   Format for loose textures: 'tga' (default), 'png', or 'vtex'\n"
               << "  --no-vtex                Disable VTex video codec; fall back to uncompressed or loose files\n"
               << "  -t, --textures-dir <dir> Search path for external or cached textures\n"
-              << "  --anim <path>            External animation .grn track to merge into output model\n"
+              << "  --anim <path>            External animation .grn track to merge into output model (can repeat)\n"
+              << "  --split-anims            Split GLB animations into separate .grn files (default)\n"
+              << "  --no-split-anims         Keep all GLB animations embedded into a single .grn file\n"
               << "  --tint-pink              Test feature: apply pink tint filter to textures\n"
               << "  --scale <val>            Global scale factor applied to geometry/bones\n"
               << "  --target-height <val>    Target height in game units (e.g. 107 for post, 73 for human)\n"
@@ -58,7 +60,13 @@ int run_cli(int argc, char* argv[]) {
         } else if ((arg == "--textures-dir" || arg == "-t") && i + 1 < argc) {
             options.textures_dir = argv[++i];
         } else if (arg == "--anim" && i + 1 < argc) {
-            options.anim_file = argv[++i];
+            std::filesystem::path a_path = argv[++i];
+            options.anim_files.push_back(a_path);
+            options.anim_file = a_path;
+        } else if (arg == "--split-anims") {
+            options.split_animations = true;
+        } else if (arg == "--no-split-anims") {
+            options.split_animations = false;
         } else if (arg == "--tint-pink") {
             options.tint_pink = true;
         } else if (arg == "--scale" && i + 1 < argc) {
@@ -91,6 +99,7 @@ int run_cli(int argc, char* argv[]) {
     }
 
     auto cli_callback = [](const std::string& item, float progress, bool success, const std::string& message) {
+        (void)item;
         if (!message.empty()) {
             std::cout << "[" << std::setw(3) << static_cast<int>(progress * 100.0f) << "%] "
                       << (success ? "OK : " : "ERR: ") << message << "\n";

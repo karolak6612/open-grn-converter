@@ -26,6 +26,16 @@ void UiPanels::set_input_path(const std::string& path) {
     }
 }
 
+void UiPanels::add_animation_paths(const std::vector<std::string>& paths) {
+    for (const auto& p : paths) {
+        if (p.empty()) continue;
+        if (std::find(anim_paths.begin(), anim_paths.end(), p) == anim_paths.end()) {
+            anim_paths.push_back(p);
+            add_log("Added animation: " + std::filesystem::path(p).filename().string(), LogEntry::Level::Info);
+        }
+    }
+}
+
 void UiPanels::render() {
     ImGuiViewport* viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(viewport->WorkPos);
@@ -187,20 +197,131 @@ void UiPanels::render_controls_panel() {
         }
     }
 
-    // Optional Animation File (Single file mode only)
-    if (!is_batch_mode) {
-        ImGui::Spacing();
-        ImGui::Text("Animation File (.grn) (Optional):");
-        ImGui::SameLine();
-        HelpMarker("Optional external Granny 1.2b animation track (.grn) to merge into the exported GLB model (e.g. attack, idle, or run animation).");
-        float anim_w = std::max(120.0f, ImGui::GetContentRegionAvail().x - browse_btn_w - spacing_x);
-        ImGui::SetNextItemWidth(anim_w);
-        ImGui::InputText("##AnimPath", anim_path_buf, sizeof(anim_path_buf));
-        ImGui::SameLine();
-        if (ImGui::Button("Browse...##Anim", ImVec2(browse_btn_w, 0))) {
-            auto file = open_file_dialog("GRN Animation Files (*.grn)\0*.grn\0All Files (*.*)\0*.*\0", "Select Animation File");
-            if (file) std::strncpy(anim_path_buf, file->c_str(), sizeof(anim_path_buf) - 1);
+    // Determine conversion direction
+    bool is_grn_to_glb = false;
+    bool is_glb_to_grn = false;
+    if (direction_item == 1) {
+        is_grn_to_glb = true;
+    } else if (direction_item == 2) {
+        is_glb_to_grn = true;
+    } else {
+        // Auto-detect based on input file extension
+        std::string ext = std::filesystem::path(input_path_buf).extension().string();
+        for (auto& c : ext) c = static_cast<char>(std::tolower(c));
+        if (ext == ".glb" || ext == ".gltf") {
+            is_glb_to_grn = true;
+        } else {
+            // Default to GRN -> GLB (or if ext is .grn or empty)
+            is_grn_to_glb = true;
         }
+    }
+
+    // Animation integration / splitting
+    if (!is_batch_mode) {
+        if (is_grn_to_glb) {
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::TextColored(ImVec4(0.92f, 0.76f, 0.28f, 1.0f), "Animations to Integrate (.grn -> GLB)");
+            ImGui::SameLine();
+            HelpMarker("Add one or more Granny 1.2b animation files (.grn) to merge into the exported GLB model.\nEach animation will be embedded as a named animation clip inside the single GLB file.");
+
+            // Action buttons
+            if (ImGui::Button("+ Add Animation(s)...##AddAnims")) {
+                auto files = open_multiple_files_dialog("GRN Animation Files (*.grn)\0*.grn\0All Files (*.*)\0*.*\0", "Select Animation Files to Integrate");
+                add_animation_paths(files);
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Clear All##ClearAnims")) {
+                anim_paths.clear();
+            }
+            ImGui::SameLine();
+            ImGui::TextDisabled("(%zu loaded)", anim_paths.size());
+
+            // Animation list table
+            float table_h = anim_paths.empty() ? 56.0f : std::min(130.0f, 26.0f + anim_paths.size() * 24.0f);
+            if (ImGui::BeginTable("AnimTable", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_BordersOuter | ImGuiTableFlags_ScrollY, ImVec2(0, table_h))) {
+                ImGui::TableSetupColumn("Del", ImGuiTableColumnFlags_WidthFixed, 28.0f);
+                ImGui::TableSetupColumn("Clip Name", ImGuiTableColumnFlags_WidthFixed, 140.0f);
+                ImGui::TableSetupColumn("Source Path", ImGuiTableColumnFlags_WidthStretch);
+                ImGui::TableHeadersRow();
+
+                if (anim_paths.empty()) {
+                    ImGui::TableNextRow();
+                    ImGui::TableSetColumnIndex(0);
+                    ImGui::TableSetColumnIndex(1);
+                    ImGui::TextDisabled("No external anims");
+                    ImGui::TableSetColumnIndex(2);
+                    ImGui::TextDisabled("Click '+ Add Animation(s)...' or drag & drop .grn files");
+                } else {
+                    int to_remove = -1;
+                    for (size_t i = 0; i < anim_paths.size(); ++i) {
+                        ImGui::TableNextRow();
+                        ImGui::PushID(static_cast<int>(i));
+
+                        // Column 0: Remove button
+                        ImGui::TableSetColumnIndex(0);
+                        if (ImGui::SmallButton("X")) {
+                            to_remove = static_cast<int>(i);
+                        }
+
+                        // Column 1: Clip name
+                        ImGui::TableSetColumnIndex(1);
+                        std::string stem = std::filesystem::path(anim_paths[i]).stem().string();
+                        ImGui::TextColored(ImVec4(0.92f, 0.76f, 0.28f, 1.0f), "%s", stem.c_str());
+
+                        // Column 2: Filename & tooltip
+                        ImGui::TableSetColumnIndex(2);
+                        std::string fname = std::filesystem::path(anim_paths[i]).filename().string();
+                        ImGui::TextUnformatted(fname.c_str());
+                        if (ImGui::IsItemHovered()) {
+                            ImGui::SetTooltip("%s", anim_paths[i].c_str());
+                        }
+
+                        ImGui::PopID();
+                    }
+                    if (to_remove >= 0 && to_remove < static_cast<int>(anim_paths.size())) {
+                        anim_paths.erase(anim_paths.begin() + to_remove);
+                    }
+                }
+                ImGui::EndTable();
+            }
+        } else if (is_glb_to_grn) {
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::TextColored(ImVec4(0.92f, 0.76f, 0.28f, 1.0f), "GLB Animation Export (.glb -> GRN)");
+            ImGui::SameLine();
+            HelpMarker("Configure how animation clips inside the GLB are exported to Granny 1.2b (.grn).");
+
+            ImGui::Checkbox("Split animations into separate .grn files", &split_animations);
+            ImGui::SameLine();
+            HelpMarker("Enabled (Recommended for Sacred Gold):\n- Base model: <Model>.grn (mesh, skeleton, textures, materials)\n- Animation clips: <Model>_<ClipName>.grn (one file per animation clip, containing skeleton and animation tracks)\n\nDisabled:\n- All animations are bundled into the base <Model>.grn file.");
+
+            if (split_animations) {
+                ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.14f, 0.14f, 0.16f, 0.6f));
+                if (ImGui::BeginChild("SplitInfoBox", ImVec2(0, 50), true)) {
+                    ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.4f, 1.0f), "Multi-file Export Active:");
+                    ImGui::TextDisabled("• Base model: <Model>.grn (mesh, skeleton, textures)");
+                    ImGui::TextDisabled("• Animations: <Model>_<ClipName>.grn (one .grn per animation)");
+                }
+                ImGui::EndChild();
+                ImGui::PopStyleColor();
+            } else {
+                ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.14f, 0.14f, 0.16f, 0.6f));
+                if (ImGui::BeginChild("SplitInfoBox", ImVec2(0, 34), true)) {
+                    ImGui::TextDisabled("• Single file: <Model>.grn (mesh, skeleton, all animations bundled)");
+                }
+                ImGui::EndChild();
+                ImGui::PopStyleColor();
+            }
+        }
+    } else {
+        // Batch Folder mode
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::TextColored(ImVec4(0.92f, 0.76f, 0.28f, 1.0f), "Batch Animation Options");
+        ImGui::Checkbox("Split GLB animations into separate .grn files", &split_animations);
+        ImGui::SameLine();
+        HelpMarker("When converting GLB files in batch mode, exports each animation clip as a separate <Model>_<ClipName>.grn file alongside the base model.");
     }
 
     ImGui::Spacing();
@@ -290,7 +411,25 @@ void UiPanels::render_controls_panel() {
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.68f, 0.54f, 0.20f, 0.95f));
     ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.85f, 0.68f, 0.26f, 1.00f));
 
-    std::string btn_label = is_batch_mode ? "Start Batch Conversion" : "Convert Model";
+    std::string btn_label;
+    if (is_batch_mode) {
+        btn_label = "Start Batch Conversion";
+    } else if (is_grn_to_glb) {
+        if (anim_paths.empty()) {
+            btn_label = "Convert GRN -> GLB";
+        } else {
+            btn_label = "Convert GRN + " + std::to_string(anim_paths.size()) + " Animation(s) -> GLB";
+        }
+    } else if (is_glb_to_grn) {
+        if (split_animations) {
+            btn_label = "Convert GLB -> Multiple GRN Files";
+        } else {
+            btn_label = "Convert GLB -> GRN";
+        }
+    } else {
+        btn_label = "Convert Model";
+    }
+
     if (ImGui::Button(btn_label.c_str(), ImVec2(-1, 38))) {
         execute_conversion();
     }
@@ -348,8 +487,15 @@ void UiPanels::execute_conversion() {
         options.target_height = target_height;
     }
 
-    std::string anim_p = anim_path_buf;
-    options.anim_file = anim_p.empty() ? std::filesystem::path() : std::filesystem::path(anim_p);
+    // Populate animation options
+    options.anim_files.clear();
+    for (const auto& p : anim_paths) {
+        if (!p.empty()) {
+            options.anim_files.emplace_back(p);
+        }
+    }
+    options.anim_file = options.anim_files.empty() ? std::filesystem::path() : options.anim_files.front();
+    options.split_animations = split_animations;
 
     std::filesystem::path out_p = output_path_buf[0] ? std::filesystem::path(output_path_buf) : std::filesystem::path();
 

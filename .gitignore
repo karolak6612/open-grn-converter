@@ -40,6 +40,7 @@ temp/
 output/
 converted/
 test_comparisons/
+*.report.json
 
 # Local asset tests
 [Gg][Rr][Nn]_[Aa]ssets/
@@ -49,3 +50,5 @@ test_grn/TEXTURES_PNG/
 GRN_TEXTURED/
 extracted_textures_cache/
 /test_grn
+test_data/
+tools/

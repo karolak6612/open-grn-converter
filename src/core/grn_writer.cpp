@@ -296,13 +296,15 @@ std::vector<uint8_t> write_grn_memory(const GrnModel& model) {
     }
     builder.end_container(dext_sec_idx);
 
-    // 3. Header Spacer (0xca5e0a01)
-    std::vector<uint8_t> spacer_payload;
-    wU32(spacer_payload, 0x5F);
-    builder.add_leaf(T_HEADER_SPACER, spacer_payload);
-
-    // 4. Transform Channels Section (0xca5e0b01)
+    // 3. Header Spacer (0xca5e0a01) & Transform Channels Section (0xca5e0b01)
+    // Transform Channels Section (0xca5e0b01)
+    // Both playgrn.exe and gr2_viewer.exe require transform channels to bind
+    // track channel IDs to bone names and allocate channel arrays in FUN_00438440.
     if (!model.bones.empty()) {
+        std::vector<uint8_t> spacer_payload;
+        wU32(spacer_payload, 0x5F);
+        builder.add_leaf(T_HEADER_SPACER, spacer_payload);
+
         std::vector<uint8_t> tc_sec_payload;
         wU32(tc_sec_payload, 0x5F);
         size_t tc_sec_idx = builder.begin_container(T_TRANSFORM_CHANNEL_SECTION, tc_sec_payload);
@@ -320,7 +322,7 @@ std::vector<uint8_t> write_grn_memory(const GrnModel& model) {
         builder.end_container(tc_sec_idx);
     }
 
-    // 5. Meshes Section (0xca5e0602)
+    // 4. Meshes Section (0xca5e0602)
     if (!model.meshes.empty()) {
         size_t mesh_sec_idx = builder.begin_container(T_MESH_SECTION);
         for (size_t mi = 0; mi < model.meshes.size(); ++mi) {
@@ -518,6 +520,8 @@ std::vector<uint8_t> write_grn_memory(const GrnModel& model) {
             builder.end_container(t_node_idx);
         }
         builder.end_container(tex_sec_idx);
+    } else {
+        builder.add_leaf(T_TEXTURE_SECTION);
     }
 
     // 8. Materials Section (0xca5e0d01)
@@ -557,28 +561,27 @@ std::vector<uint8_t> write_grn_memory(const GrnModel& model) {
         builder.add_leaf(T_DATA_EXTENSION_REFERENCE, ref_payload);
         builder.end_container(m_node_idx);
         builder.end_container(mat_sec_idx);
+    } else {
+        builder.add_leaf(T_MATERIAL_SECTION);
     }
 
     // 9. Forms Section (0xca5e0c01)
     if (!model.meshes.empty() || !model.bones.empty()) {
         size_t form_sec_idx = builder.begin_container(T_FORM_SECTION);
-        std::vector<uint8_t> form_payload;
-        wU32(form_payload, 1);
-        size_t form_node_idx = builder.begin_container(T_FORM, form_payload);
+        size_t form_node_idx = builder.begin_container(T_FORM);
 
         if (!model.bones.empty()) {
             size_t fsk_sec_idx = builder.begin_container(T_FORM_SKELETON_SECTION);
-            size_t fsk_node_idx = builder.begin_container(T_FORM_SKELETON);
+            std::vector<uint8_t> fsk_payload;
+            wU32(fsk_payload, 1);
+            size_t fsk_node_idx = builder.begin_container(T_FORM_SKELETON, fsk_payload);
 
             std::vector<uint8_t> fbc_payload;
             for (size_t b = 0; b < model.bones.size(); ++b) {
                 wI32(fbc_payload, static_cast<int32_t>(b + 1));
             }
             builder.add_leaf(T_FORM_BONE_CHANNELS, fbc_payload);
-
-            std::vector<uint8_t> ch_payload;
-            wU32(ch_payload, 1);
-            builder.add_leaf(T_FORM_CHANNEL_INFO, ch_payload);
+            builder.add_leaf(T_FORM_CHANNEL_INFO);
 
             builder.end_container(fsk_node_idx);
             builder.end_container(fsk_sec_idx);
@@ -592,10 +595,7 @@ std::vector<uint8_t> write_grn_memory(const GrnModel& model) {
                 wU32(fm_payload, static_cast<uint32_t>(mi + 1));
                 size_t fm_node_idx = builder.begin_container(T_FORM_MESH, fm_payload);
 
-                std::vector<uint8_t> info_payload;
-                wI32(info_payload, 12);
-                for (int k = 0; k < 7; ++k) wI32(info_payload, 0);
-                builder.add_leaf(T_FORM_MESH_INFO, info_payload);
+                builder.add_leaf(T_FORM_MESH_INFO);
 
                 size_t fmb_sec_idx = builder.begin_container(T_FORM_MESH_BONE_SECTION);
                 std::vector<int32_t> palette = mesh.bone_index_map;
@@ -611,6 +611,8 @@ std::vector<uint8_t> write_grn_memory(const GrnModel& model) {
                 builder.end_container(fm_node_idx);
             }
             builder.end_container(fm_sec_idx);
+        } else {
+            builder.add_leaf(T_FORM_MESH_SECTION);
         }
 
         builder.end_container(form_node_idx);
@@ -619,10 +621,10 @@ std::vector<uint8_t> write_grn_memory(const GrnModel& model) {
 
     // 10. Model & Render Passes Section (0xca5e0e01)
     if (!model.meshes.empty()) {
-        std::vector<uint8_t> msec_payload;
-        wU32(msec_payload, 1);
-        size_t model_sec_idx = builder.begin_container(T_MODEL_SECTION, msec_payload);
-        size_t model_node_idx = builder.begin_container(T_MODEL, msec_payload);
+        size_t model_sec_idx = builder.begin_container(T_MODEL_SECTION);
+        std::vector<uint8_t> m_payload;
+        wU32(m_payload, 1);
+        size_t model_node_idx = builder.begin_container(T_MODEL, m_payload);
 
         std::vector<uint8_t> rpsec_payload;
         wI32(rpsec_payload, 0); wI32(rpsec_payload, 1);
@@ -681,12 +683,10 @@ std::vector<uint8_t> write_grn_memory(const GrnModel& model) {
         builder.end_container(model_node_idx);
         builder.end_container(model_sec_idx);
     } else {
-        std::vector<uint8_t> msec_payload;
-        wU32(msec_payload, 1);
-        size_t model_sec_idx = builder.begin_container(T_MODEL_SECTION, msec_payload);
-        std::vector<uint8_t> ref_payload;
-        wU32(ref_payload, static_cast<uint32_t>(model_dext + 1));
-        builder.add_leaf(T_DATA_EXTENSION_REFERENCE, ref_payload);
+        size_t model_sec_idx = builder.begin_container(T_MODEL_SECTION);
+        std::vector<uint8_t> m_payload;
+        wU32(m_payload, 1);
+        builder.add_leaf(T_MODEL, m_payload);
         builder.end_container(model_sec_idx);
     }
 
@@ -701,8 +701,19 @@ std::vector<uint8_t> write_grn_memory(const GrnModel& model) {
             } else {
                 size_t track_sec_idx = builder.begin_container(T_ANIMATION_TRANSFORM_TRACK_SECTION);
                 for (const auto& track : anim.tracks) {
+                    int32_t ch_id = track.channel_id;
+                    if (!track.bone_name.empty()) {
+                        for (size_t bi = 0; bi < model.bones.size(); ++bi) {
+                            if (model.bones[bi].name == track.bone_name) {
+                                ch_id = static_cast<int32_t>(bi + 1);
+                                break;
+                            }
+                        }
+                    }
+                    if (ch_id <= 0) ch_id = 1;
+
                     std::vector<uint8_t> trk_payload;
-                    wI32(trk_payload, track.channel_id);
+                    wI32(trk_payload, ch_id);
                     wI32(trk_payload, 0);
                     if (track.format == "split") {
                         wI32(trk_payload, 1);
@@ -712,7 +723,10 @@ std::vector<uint8_t> write_grn_memory(const GrnModel& model) {
                         wI32(trk_payload, static_cast<int32_t>(track.translations.size()));
                         wI32(trk_payload, static_cast<int32_t>(track.rotations.size()));
                         wI32(trk_payload, static_cast<int32_t>(track.scale_shears.size()));
-                        for (int k = 0; k < 4; ++k) wI32(trk_payload, 0);
+                        wI32(trk_payload, 0);
+                        wI32(trk_payload, 1);
+                        wI32(trk_payload, 2);
+                        wI32(trk_payload, 0);
                         for (float t : track.translation_times) wF32(trk_payload, t);
                         for (float t : track.rotation_times) wF32(trk_payload, t);
                         for (float t : track.scale_shear_times) wF32(trk_payload, t);
@@ -770,12 +784,15 @@ std::vector<uint8_t> write_grn_memory(const GrnModel& model) {
     size_t pad1 = (16 - (sec1_data.size() % 16)) % 16;
     if (pad1) sec1_data.insert(sec1_data.end(), pad1, 0);
 
-    // Section 2: Footer / Relocations
+    // Section 2: Footer / Relocations (exact 28-byte Granny 1.2b footer)
     std::vector<uint8_t> sec2_data;
-    wU32(sec2_data, 1); wU32(sec2_data, 0); wU32(sec2_data, 0x1C); wU32(sec2_data, 0);
-    wU32(sec2_data, T_NULL_TERMINATOR); wU32(sec2_data, 0x1C); wU32(sec2_data, 0);
-    size_t pad2 = (16 - (sec2_data.size() % 16)) % 16;
-    if (pad2) sec2_data.insert(sec2_data.end(), pad2, 0);
+    wU32(sec2_data, 1);
+    wU32(sec2_data, 0x0012ED54);
+    wU32(sec2_data, 0x0012ED54);
+    wU32(sec2_data, 0x0012EEB8);
+    wU32(sec2_data, T_NULL_TERMINATOR);
+    wU32(sec2_data, 0x1C);
+    wU32(sec2_data, 0);
 
     // Calculate section offsets
     uint32_t sec0_off = 0x9C;

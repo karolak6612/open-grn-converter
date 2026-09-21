@@ -62,6 +62,18 @@ static fs::path locate_viewer() {
         return parent_viewer;
     }
 
+    // 5. test_data folder
+#ifdef GRN_SOURCE_CODE_DIR
+    fs::path td_viewer = fs::path(GRN_SOURCE_CODE_DIR) / "test_data" / "gr2_viewer.exe";
+    if (fs::is_regular_file(td_viewer, ec)) {
+        return td_viewer;
+    }
+#endif
+    fs::path cwd_td_viewer = fs::current_path() / "test_data" / "gr2_viewer.exe";
+    if (fs::is_regular_file(cwd_td_viewer, ec)) {
+        return cwd_td_viewer;
+    }
+
     return {};
 }
 

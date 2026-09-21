@@ -60,6 +60,18 @@ static std::string get_extras_json(const cgltf_data* data, const cgltf_extras& e
     return {};
 }
 
+constexpr float kInvSqrt2 = 0.7071067811865476f;
+const Vec4 q_inv_yup_conv{kInvSqrt2, 0.0f, 0.0f, kInvSqrt2};
+
+static inline Vec4 quat_mul(const Vec4& a, const Vec4& b) {
+    return {
+        a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
+        a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
+        a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w,
+        a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z
+    };
+}
+
 std::optional<GrnModel> load_glb_memory(const uint8_t* data, size_t size, const GlbImportOptions& options) {
     if (!data || size < 20) return std::nullopt;
 
@@ -275,37 +287,41 @@ std::optional<GrnModel> load_glb_memory(const uint8_t* data, size_t size, const 
                 bone.parent_index = -1;
             }
 
+            bool is_root = (bone.parent_index < 0);
+
             if (jnode->has_translation) {
                 float tx = jnode->translation[0] * options.scale;
                 float ty = jnode->translation[1] * options.scale;
                 float tz = jnode->translation[2] * options.scale;
-                bone.position.x = tx;
-                bone.position.y = options.y_up ? -tz : ty;
-                bone.position.z = options.y_up ? ty : tz;
+                if (options.y_up && is_root) {
+                    bone.position.x = tx;
+                    bone.position.y = -tz;
+                    bone.position.z = ty;
+                } else {
+                    bone.position.x = tx;
+                    bone.position.y = ty;
+                    bone.position.z = tz;
+                }
             }
             if (jnode->has_rotation) {
-                if (options.y_up) {
-                    bone.rotation.x = jnode->rotation[0];
-                    bone.rotation.y = -jnode->rotation[2];
-                    bone.rotation.z = jnode->rotation[1];
-                    bone.rotation.w = jnode->rotation[3];
-                } else {
-                    bone.rotation.x = jnode->rotation[0];
-                    bone.rotation.y = jnode->rotation[1];
-                    bone.rotation.z = jnode->rotation[2];
-                    bone.rotation.w = jnode->rotation[3];
+                Vec4 r{jnode->rotation[0], jnode->rotation[1], jnode->rotation[2], jnode->rotation[3]};
+                if (options.y_up && is_root) {
+                    r = quat_mul(q_inv_yup_conv, r);
                 }
+                float qlen = std::sqrt(r.x * r.x + r.y * r.y + r.z * r.z + r.w * r.w);
+                if (qlen > 1e-6f) {
+                    r.x /= qlen; r.y /= qlen; r.z /= qlen; r.w /= qlen;
+                } else {
+                    r = {0.0f, 0.0f, 0.0f, 1.0f};
+                }
+                bone.rotation = r;
             }
             if (jnode->has_scale) {
                 float sx = jnode->scale[0];
                 float sy = jnode->scale[1];
                 float sz = jnode->scale[2];
-                bool is_root = (bone.parent_index < 0);
                 if (options.y_up && is_root) {
-                    float n_sy = sz;
-                    float n_sz = sy;
-                    sy = n_sy;
-                    sz = n_sz;
+                    std::swap(sy, sz);
                 }
                 bone.scale_3x3[0] = sx;
                 bone.scale_3x3[4] = sy;
@@ -625,12 +641,193 @@ std::optional<GrnModel> load_glb_memory(const uint8_t* data, size_t size, const 
         anim.name = anim_src.name ? anim_src.name : ("Animation_" + std::to_string(model.animations.size()));
 
         float max_dur = 0.0f;
-        for (size_t si = 0; si < anim_src.samplers_count; ++si) {
-            const auto& sampler = anim_src.samplers[si];
-            if (sampler.input && sampler.input->has_max) {
-                max_dur = std::max(max_dur, sampler.input->max[0]);
+
+        // Group channels by target node
+        std::map<const cgltf_node*, std::vector<const cgltf_animation_channel*>> node_channels;
+        for (size_t ci = 0; ci < anim_src.channels_count; ++ci) {
+            const auto& ch = anim_src.channels[ci];
+            if (ch.target_node && ch.sampler && ch.sampler->input && ch.sampler->output) {
+                node_channels[ch.target_node].push_back(&ch);
             }
         }
+
+        for (const auto& [tnode, ch_list] : node_channels) {
+            int32_t joint_idx = -1;
+            auto it = node_to_joint.find(tnode);
+            if (it != node_to_joint.end()) {
+                joint_idx = it->second;
+            } else if (tnode->name) {
+                for (size_t bi = 0; bi < model.bones.size(); ++bi) {
+                    if (model.bones[bi].name == tnode->name) {
+                        joint_idx = static_cast<int32_t>(bi);
+                        break;
+                    }
+                }
+            }
+
+            if (joint_idx < 0) {
+                if (gltf->skins_count > 0) {
+                    // If a model has a skeleton, non-joint nodes (e.g. mesh nodes, cameras, lights)
+                    // are NOT part of the skeleton and must be discarded.
+                    continue;
+                }
+                GrnBone b;
+                b.name = tnode->name ? tnode->name : ("Node_" + std::to_string(model.bones.size()));
+                b.parent_index = -1;
+                joint_idx = static_cast<int32_t>(model.bones.size());
+                node_to_joint[tnode] = joint_idx;
+                model.bones.push_back(std::move(b));
+            }
+
+            AnimTrack track;
+            track.channel_id = joint_idx + 1;
+            track.bone_name = model.bones[joint_idx].name;
+            track.format = "split";
+            bool is_root = (model.bones[joint_idx].parent_index < 0);
+
+            for (const auto* ch : ch_list) {
+                const auto* samp = ch->sampler;
+                if (!samp->input || !samp->output) continue;
+
+                size_t key_count = samp->input->count;
+                if (key_count == 0) continue;
+
+                std::vector<float> times(key_count);
+                cgltf_accessor_unpack_floats(samp->input, times.data(), key_count);
+                for (float t : times) {
+                    max_dur = std::max(max_dur, t);
+                }
+
+                bool is_cubic = (samp->interpolation == cgltf_interpolation_type_cubic_spline);
+
+                if (ch->target_path == cgltf_animation_path_type_translation) {
+                    track.translation_times = times;
+                    size_t stride = is_cubic ? 9 : 3;
+                    size_t off = is_cubic ? 3 : 0;
+                    std::vector<float> raw(key_count * stride);
+                    cgltf_accessor_unpack_floats(samp->output, raw.data(), raw.size());
+
+                    for (size_t k = 0; k < key_count; ++k) {
+                        float px = raw[k * stride + off + 0];
+                        float py = raw[k * stride + off + 1];
+                        float pz = raw[k * stride + off + 2];
+
+                        float tx, ty, tz;
+                        if (options.y_up && is_root) {
+                            tx = px * options.scale;
+                            ty = -pz * options.scale;
+                            tz = py * options.scale;
+                        } else {
+                            tx = px * options.scale;
+                            ty = py * options.scale;
+                            tz = pz * options.scale;
+                        }
+                        track.translations.push_back({tx, ty, tz});
+                    }
+                } else if (ch->target_path == cgltf_animation_path_type_rotation) {
+                    track.rotation_times = times;
+                    size_t stride = is_cubic ? 12 : 4;
+                    size_t off = is_cubic ? 4 : 0;
+                    std::vector<float> raw(key_count * stride);
+                    cgltf_accessor_unpack_floats(samp->output, raw.data(), raw.size());
+
+                    for (size_t k = 0; k < key_count; ++k) {
+                        float qx = raw[k * stride + off + 0];
+                        float qy = raw[k * stride + off + 1];
+                        float qz = raw[k * stride + off + 2];
+                        float qw = raw[k * stride + off + 3];
+
+                        Vec4 r{qx, qy, qz, qw};
+                        if (options.y_up && is_root) {
+                            r = quat_mul(q_inv_yup_conv, r);
+                        }
+                        float qlen = std::sqrt(r.x * r.x + r.y * r.y + r.z * r.z + r.w * r.w);
+                        if (qlen > 1e-6f) {
+                            r.x /= qlen; r.y /= qlen; r.z /= qlen; r.w /= qlen;
+                        } else {
+                            r = {0.0f, 0.0f, 0.0f, 1.0f};
+                        }
+                        track.rotations.push_back(r);
+                    }
+                } else if (ch->target_path == cgltf_animation_path_type_scale) {
+                    track.scale_shear_times = times;
+                    size_t stride = is_cubic ? 9 : 3;
+                    size_t off = is_cubic ? 3 : 0;
+                    std::vector<float> raw(key_count * stride);
+                    cgltf_accessor_unpack_floats(samp->output, raw.data(), raw.size());
+
+                    for (size_t k = 0; k < key_count; ++k) {
+                        float sx = raw[k * stride + off + 0];
+                        float sy = raw[k * stride + off + 1];
+                        float sz = raw[k * stride + off + 2];
+                        if (options.y_up && is_root) {
+                            std::swap(sy, sz);
+                        }
+                        std::array<float, 9> m{};
+                        m[0] = sx; m[4] = sy; m[8] = sz;
+                        track.scale_shears.push_back(m);
+                    }
+                }
+            }
+
+            if (!track.translations.empty() || !track.rotations.empty() || !track.scale_shears.empty()) {
+                anim.tracks.push_back(std::move(track));
+            }
+        }
+
+        // Ensure every bone in model.bones has a track in anim.tracks (1:1 with T_FORM_BONE_CHANNELS)
+        std::unordered_map<int32_t, size_t> existing_tracks;
+        for (size_t ti = 0; ti < anim.tracks.size(); ++ti) {
+            existing_tracks[anim.tracks[ti].channel_id] = ti;
+        }
+
+        float clip_dur = (max_dur > 0.0f) ? max_dur : (1.0f / 30.0f);
+
+        for (size_t bi = 0; bi < model.bones.size(); ++bi) {
+            int32_t ch_id = static_cast<int32_t>(bi + 1);
+            auto it = existing_tracks.find(ch_id);
+            if (it != existing_tracks.end()) {
+                auto& trk = anim.tracks[it->second];
+                trk.position_interp_mode = 2;
+                trk.quaternion_interp_mode = 2;
+                trk.scale_shear_interp_mode = 1;
+
+                if (trk.translations.empty()) {
+                    trk.translation_times = {0.0f, clip_dur};
+                    trk.translations = {model.bones[bi].position, model.bones[bi].position};
+                }
+                if (trk.rotations.empty()) {
+                    trk.rotation_times = {0.0f, clip_dur};
+                    trk.rotations = {model.bones[bi].rotation, model.bones[bi].rotation};
+                }
+                if (trk.scale_shears.empty()) {
+                    trk.scale_shear_times = {0.0f, clip_dur};
+                    trk.scale_shears = {model.bones[bi].scale_3x3, model.bones[bi].scale_3x3};
+                }
+            } else {
+                // Add static track for un-animated bone
+                AnimTrack trk;
+                trk.channel_id = ch_id;
+                trk.bone_name = model.bones[bi].name;
+                trk.format = "split";
+                trk.position_interp_mode = 2;
+                trk.quaternion_interp_mode = 2;
+                trk.scale_shear_interp_mode = 1;
+                trk.translation_times = {0.0f, clip_dur};
+                trk.translations = {model.bones[bi].position, model.bones[bi].position};
+                trk.rotation_times = {0.0f, clip_dur};
+                trk.rotations = {model.bones[bi].rotation, model.bones[bi].rotation};
+                trk.scale_shear_times = {0.0f, clip_dur};
+                trk.scale_shears = {model.bones[bi].scale_3x3, model.bones[bi].scale_3x3};
+                anim.tracks.push_back(std::move(trk));
+            }
+        }
+
+        // Sort tracks by channel_id (1, 2, ..., N)
+        std::sort(anim.tracks.begin(), anim.tracks.end(), [](const AnimTrack& a, const AnimTrack& b) {
+            return a.channel_id < b.channel_id;
+        });
+
         anim.duration = max_dur;
         model.animations.push_back(std::move(anim));
     }

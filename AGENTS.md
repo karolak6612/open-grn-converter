@@ -214,6 +214,24 @@ Granny 1.2b files are relational binary containers structured as hierarchical ch
   $$q_{gltf} = (x_{grn}, z_{grn}, -y_{grn}, w_{grn})$$
 - When `--z-up` is specified, coordinate swizzling is bypassed, preserving native Granny coordinates directly in the glTF output.
 
+### 5.5 Animation Container Architecture & Reverse Engineering Findings
+
+1. **Granny 1.2b Animation Structure**:
+   - Every animation container (`T_ANIMATION_SECTION` `0xca5e1205`) contains track leaves (`T_ANIMATION_TRANSFORM_TRACK_KEYS` `0xca5e1204`).
+   - Each track references a 1-indexed bone channel ID (`channel_id = bone_index + 1`).
+   - Skeletons require pre-registration of transform channels: whenever `!model.bones.empty()`, Section 1 must emit `T_HEADER_SPACER` (`0xca5e0a01`) followed by `T_TRANSFORM_CHANNEL_SECTION` (`0xca5e0b01`) containing `T_TRANSFORM_CHANNEL` (`0xca5e0b00`) nodes. Without this, engines fail to allocate channel map tables.
+   - Pure animation files (no mesh) must emit an empty `T_MESH_SECTION` (`0xca5e0602`) leaf to satisfy downstream Granny chunk iterators.
+2. **Split Animation Pipeline (`--split-anims`)**:
+   - Granny 1.2b engines (e.g. *Sacred Gold*) keep character meshes in base `.grn` files (`Hero.grn`) and animation clips in standalone files (`Hero_Run.grn`, `Hero_Attack.grn`).
+   - When converting `GLB -> GRN`, `open-grn-converter` defaults to `--split-anims`:
+     - Base file: Mesh + Materials + Textures + Skeleton (`0` animations).
+     - Clip files: Matching Skeleton + Animation Track (`0` meshes).
+   - CLI allows recombining external animations back onto rigged models via `--anim <path>` (can repeat).
+3. **Viewer Discrepancy: `playgrn.exe` vs `gr2_viewer.exe`**:
+   - `playgrn.exe` (Authentic Granny 1.2b player): Reads `.grn` relational chunks directly, loading raw keyframes into linear memory pools. Performs 0 curve-fitting conversion. Can play 1,900+ animated bone tracks natively with 0 crashes.
+   - `gr2_viewer.exe` (Granny 2 viewer): Has no native Granny 1.2b renderer; converts `.grn` to `.gr2` on the fly via `GRN2GR2ConvertGRNFile` (`0x00438750`). Uses a debug page-heap allocator (`VirtualAlloc` + guard page) with a 2 GB 32-bit address space limit. Modern massive rigs (>1,000 active 61-frame spline tracks) exhaust virtual address space during cubic curve optimization, causing `0xC0000005` at `0x004acf4e`.
+   - The `.grn` files produced by `open-grn-converter` are 100% valid Granny 1.2b containers.
+
 ---
 
 ## 6. Build, Test, and Tooling Reference

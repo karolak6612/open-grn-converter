@@ -6,6 +6,7 @@
 #include <cstring>
 #include <algorithm>
 #include <set>
+#include <unordered_set>
 
 using json = nlohmann::json;
 
@@ -394,6 +395,7 @@ std::vector<uint8_t> export_grn_to_glb_memory(const GrnModel& model, const GlbEx
     }
 
     // Meshes and Primitives
+    std::vector<uint32_t> mesh_node_indices;
     for (size_t mi = 0; mi < model.meshes.size(); ++mi) {
         const auto& m = model.meshes[mi];
         if (m.vertices.empty()) continue;
@@ -558,34 +560,39 @@ std::vector<uint8_t> export_grn_to_glb_memory(const GrnModel& model, const GlbEx
                 {"max", {max_pos.x, max_pos.y, max_pos.z}}
             });
 
-            json prim_attrs = {{"POSITION", pos_acc}};
-
+            uint32_t norm_acc = 0;
             if (has_normals && !norm_buf.empty()) {
                 uint32_t norm_bv = add_buffer_view(norm_buf.data(), norm_buf.size() * sizeof(float), 34962);
-                uint32_t norm_acc = static_cast<uint32_t>(accessors.size());
+                norm_acc = static_cast<uint32_t>(accessors.size());
                 accessors.push_back({
                     {"bufferView", norm_bv}, {"byteOffset", 0}, {"componentType", 5126},
                     {"count", vert_count}, {"type", "VEC3"}
                 });
-                prim_attrs["NORMAL"] = norm_acc;
             }
 
+            uint32_t uv_acc = 0;
             if (has_uvs && !uv_buf.empty()) {
                 uint32_t uv_bv = add_buffer_view(uv_buf.data(), uv_buf.size() * sizeof(float), 34962);
-                uint32_t uv_acc = static_cast<uint32_t>(accessors.size());
+                uv_acc = static_cast<uint32_t>(accessors.size());
                 accessors.push_back({
                     {"bufferView", uv_bv}, {"byteOffset", 0}, {"componentType", 5126},
                     {"count", vert_count}, {"type", "VEC2"}
                 });
-                prim_attrs["TEXCOORD_0"] = uv_acc;
             } else if (!tex_indices.empty()) {
                 std::vector<float> default_uvs(vert_count * 2, 0.0f);
                 uint32_t uv_bv = add_buffer_view(default_uvs.data(), default_uvs.size() * sizeof(float), 34962);
-                uint32_t uv_acc = static_cast<uint32_t>(accessors.size());
+                uv_acc = static_cast<uint32_t>(accessors.size());
                 accessors.push_back({
                     {"bufferView", uv_bv}, {"byteOffset", 0}, {"componentType", 5126},
                     {"count", vert_count}, {"type", "VEC2"}
                 });
+            }
+
+            json prim_attrs = {{"POSITION", pos_acc}};
+            if (has_normals && !norm_buf.empty()) {
+                prim_attrs["NORMAL"] = norm_acc;
+            }
+            if ((has_uvs && !uv_buf.empty()) || !tex_indices.empty()) {
                 prim_attrs["TEXCOORD_0"] = uv_acc;
             }
 
@@ -634,39 +641,83 @@ std::vector<uint8_t> export_grn_to_glb_memory(const GrnModel& model, const GlbEx
         uint32_t mesh_node_idx = static_cast<uint32_t>(gltf["nodes"].size());
         gltf["nodes"].push_back(mesh_node);
         root_node_indices.push_back(mesh_node_idx);
+        mesh_node_indices.push_back(mesh_node_idx);
     }
 
     // Animations
     if (!model.animations.empty()) {
+        std::unordered_set<std::string> used_anim_names;
         for (const auto& anim : model.animations) {
             if (anim.tracks.empty()) continue;
+
+            std::string anim_name = to_valid_utf8(anim.name);
+            if (anim_name.empty()) anim_name = "Animation";
+            std::string unique_anim_name = anim_name;
+            int counter = 1;
+            while (used_anim_names.count(unique_anim_name)) {
+                unique_anim_name = anim_name + "_" + std::to_string(counter++);
+            }
+            used_anim_names.insert(unique_anim_name);
+
             json anim_obj;
-            anim_obj["name"] = to_valid_utf8(anim.name);
+            anim_obj["name"] = unique_anim_name;
             json samplers = json::array();
             json channels = json::array();
             std::set<std::pair<int32_t, std::string>> used_targets;
-            auto add_channel = [&](uint32_t sampler_idx, int32_t target_node, const std::string& path) {
-                if (used_targets.insert({target_node, path}).second) {
-                    channels.push_back({{"sampler", sampler_idx}, {"target", {{"node", target_node}, {"path", path}}}});
-                }
-            };
 
             for (const auto& track : anim.tracks) {
                 int32_t node_idx = -1;
-                size_t target_bi = 0;
+                size_t target_bi = static_cast<size_t>(-1);
+
+                // 1. Exact bone name match
                 for (size_t bi = 0; bi < model.bones.size(); ++bi) {
-                    if (model.bones[bi].name == track.bone_name ||
-                        (track.channel_id > 0 && static_cast<size_t>(track.channel_id - 1) == bi)) {
+                    if (model.bones[bi].name == track.bone_name) {
                         node_idx = joint_indices[bi];
                         target_bi = bi;
                         break;
                     }
                 }
+
+                // 2. Case-insensitive bone name match
+                if (node_idx < 0) {
+                    for (size_t bi = 0; bi < model.bones.size(); ++bi) {
+                        if (track.bone_name.size() == model.bones[bi].name.size() &&
+                            std::equal(track.bone_name.begin(), track.bone_name.end(),
+                                       model.bones[bi].name.begin(),
+                                       [](char a, char b){ return std::tolower(static_cast<unsigned char>(a)) == std::tolower(static_cast<unsigned char>(b)); })) {
+                            node_idx = joint_indices[bi];
+                            target_bi = bi;
+                            break;
+                        }
+                    }
+                }
+
+                // 3. Fallback to channel_id ONLY if track has no specific name or is default "Bone_N"
+                if (node_idx < 0 && (track.bone_name.empty() || track.bone_name.rfind("Bone_", 0) == 0)) {
+                    if (track.channel_id > 0 && static_cast<size_t>(track.channel_id - 1) < model.bones.size()) {
+                        target_bi = static_cast<size_t>(track.channel_id - 1);
+                        node_idx = joint_indices[target_bi];
+                    }
+                }
+
+                // 4. Mesh node fallback
+                if (node_idx < 0) {
+                    for (size_t mi = 0; mi < model.meshes.size(); ++mi) {
+                        if (mi < mesh_node_indices.size() && model.meshes[mi].name == track.bone_name) {
+                            node_idx = static_cast<int32_t>(mesh_node_indices[mi]);
+                            break;
+                        }
+                    }
+                }
+
                 if (node_idx < 0) continue;
-                bool is_root = is_root_bone[target_bi];
+                bool is_root = (target_bi < model.bones.size()) ? is_root_bone[target_bi] : false;
 
                 if (track.format == "split") {
-                    if (!track.translation_times.empty() && !track.translations.empty()) {
+                    if (!track.translation_times.empty() && !track.translations.empty() &&
+                        used_targets.find({node_idx, "translation"}) == used_targets.end()) {
+                        used_targets.insert({node_idx, "translation"});
+
                         uint32_t t_bv = add_buffer_view(track.translation_times.data(), track.translation_times.size() * sizeof(float));
                         float min_t = track.translation_times.front();
                         float max_t = track.translation_times.back();
@@ -698,10 +749,13 @@ std::vector<uint8_t> export_grn_to_glb_memory(const GrnModel& model, const GlbEx
 
                         uint32_t samp_idx = static_cast<uint32_t>(samplers.size());
                         samplers.push_back({{"input", t_acc}, {"output", v_acc}, {"interpolation", "LINEAR"}});
-                        add_channel(samp_idx, node_idx, "translation");
+                        channels.push_back({{"sampler", samp_idx}, {"target", {{"node", node_idx}, {"path", "translation"}}}});
                     }
 
-                    if (!track.rotation_times.empty() && !track.rotations.empty()) {
+                    if (!track.rotation_times.empty() && !track.rotations.empty() &&
+                        used_targets.find({node_idx, "rotation"}) == used_targets.end()) {
+                        used_targets.insert({node_idx, "rotation"});
+
                         uint32_t t_bv = add_buffer_view(track.rotation_times.data(), track.rotation_times.size() * sizeof(float));
                         float min_t = track.rotation_times.front();
                         float max_t = track.rotation_times.back();
@@ -738,70 +792,149 @@ std::vector<uint8_t> export_grn_to_glb_memory(const GrnModel& model, const GlbEx
 
                         uint32_t samp_idx = static_cast<uint32_t>(samplers.size());
                         samplers.push_back({{"input", t_acc}, {"output", v_acc}, {"interpolation", "LINEAR"}});
-                        add_channel(samp_idx, node_idx, "rotation");
+                        channels.push_back({{"sampler", samp_idx}, {"target", {{"node", node_idx}, {"path", "rotation"}}}});
                     }
-                } else {
-                    if (!track.times.empty() && !track.translations.empty() && !track.rotations.empty()) {
-                        uint32_t t_bv = add_buffer_view(track.times.data(), track.times.size() * sizeof(float));
-                        float min_t = track.times.front();
-                        float max_t = track.times.back();
+
+                    if (!track.scale_shear_times.empty() && !track.scale_shears.empty() &&
+                        used_targets.find({node_idx, "scale"}) == used_targets.end()) {
+                        used_targets.insert({node_idx, "scale"});
+
+                        uint32_t t_bv = add_buffer_view(track.scale_shear_times.data(), track.scale_shear_times.size() * sizeof(float));
+                        float min_t = track.scale_shear_times.front();
+                        float max_t = track.scale_shear_times.back();
                         uint32_t t_acc = static_cast<uint32_t>(accessors.size());
                         accessors.push_back({
                             {"bufferView", t_bv}, {"byteOffset", 0}, {"componentType", 5126},
-                            {"count", track.times.size()}, {"type", "SCALAR"},
+                            {"count", track.scale_shear_times.size()}, {"type", "SCALAR"},
                             {"min", {min_t}}, {"max", {max_t}}
                         });
 
-                        std::vector<float> trans_vals;
-                        for (const auto& tr : track.translations) {
+                        std::vector<float> scale_vals;
+                        for (const auto& m : track.scale_shears) {
+                            float sx = m[0];
+                            float sy = m[4];
+                            float sz = m[8];
                             if (options.y_up && is_root) {
-                                trans_vals.push_back(tr.x);
-                                trans_vals.push_back(tr.z);
-                                trans_vals.push_back(-tr.y);
-                            } else {
-                                trans_vals.push_back(tr.x);
-                                trans_vals.push_back(tr.y);
-                                trans_vals.push_back(tr.z);
+                                std::swap(sy, sz);
                             }
+                            scale_vals.push_back(sx);
+                            scale_vals.push_back(sy);
+                            scale_vals.push_back(sz);
                         }
-                        uint32_t tv_bv = add_buffer_view(trans_vals.data(), trans_vals.size() * sizeof(float));
-                        uint32_t tv_acc = static_cast<uint32_t>(accessors.size());
+                        uint32_t v_bv = add_buffer_view(scale_vals.data(), scale_vals.size() * sizeof(float));
+                        uint32_t v_acc = static_cast<uint32_t>(accessors.size());
                         accessors.push_back({
-                            {"bufferView", tv_bv}, {"byteOffset", 0}, {"componentType", 5126},
-                            {"count", track.translations.size()}, {"type", "VEC3"}
+                            {"bufferView", v_bv}, {"byteOffset", 0}, {"componentType", 5126},
+                            {"count", track.scale_shears.size()}, {"type", "VEC3"}
                         });
 
-                        std::vector<float> rot_vals;
-                        for (const auto& rot : track.rotations) {
-                            Vec4 r = rot;
-                            if (options.y_up && is_root) {
-                                r = quat_mul(q_yup_conv, r);
+                        uint32_t samp_idx = static_cast<uint32_t>(samplers.size());
+                        samplers.push_back({{"input", t_acc}, {"output", v_acc}, {"interpolation", "LINEAR"}});
+                        channels.push_back({{"sampler", samp_idx}, {"target", {{"node", node_idx}, {"path", "scale"}}}});
+                    }
+                } else {
+                    if (!track.times.empty() && (!track.translations.empty() || !track.rotations.empty() || !track.scale_shears.empty())) {
+                        bool need_trans = (used_targets.find({node_idx, "translation"}) == used_targets.end()) && !track.translations.empty();
+                        bool need_rot = (used_targets.find({node_idx, "rotation"}) == used_targets.end()) && !track.rotations.empty();
+                        bool need_scale = (used_targets.find({node_idx, "scale"}) == used_targets.end()) && !track.scale_shears.empty();
+
+                        if (need_trans || need_rot || need_scale) {
+                            uint32_t t_bv = add_buffer_view(track.times.data(), track.times.size() * sizeof(float));
+                            float min_t = track.times.front();
+                            float max_t = track.times.back();
+                            uint32_t t_acc = static_cast<uint32_t>(accessors.size());
+                            accessors.push_back({
+                                {"bufferView", t_bv}, {"byteOffset", 0}, {"componentType", 5126},
+                                {"count", track.times.size()}, {"type", "SCALAR"},
+                                {"min", {min_t}}, {"max", {max_t}}
+                            });
+
+                            if (need_trans) {
+                                used_targets.insert({node_idx, "translation"});
+
+                                std::vector<float> trans_vals;
+                                for (const auto& tr : track.translations) {
+                                    if (options.y_up && is_root) {
+                                        trans_vals.push_back(tr.x);
+                                        trans_vals.push_back(tr.z);
+                                        trans_vals.push_back(-tr.y);
+                                    } else {
+                                        trans_vals.push_back(tr.x);
+                                        trans_vals.push_back(tr.y);
+                                        trans_vals.push_back(tr.z);
+                                    }
+                                }
+                                uint32_t tv_bv = add_buffer_view(trans_vals.data(), trans_vals.size() * sizeof(float));
+                                uint32_t tv_acc = static_cast<uint32_t>(accessors.size());
+                                accessors.push_back({
+                                    {"bufferView", tv_bv}, {"byteOffset", 0}, {"componentType", 5126},
+                                    {"count", track.translations.size()}, {"type", "VEC3"}
+                                });
+
+                                uint32_t s_tr = static_cast<uint32_t>(samplers.size());
+                                samplers.push_back({{"input", t_acc}, {"output", tv_acc}, {"interpolation", "LINEAR"}});
+                                channels.push_back({{"sampler", s_tr}, {"target", {{"node", node_idx}, {"path", "translation"}}}});
                             }
-                            float qlen = std::sqrt(r.x * r.x + r.y * r.y + r.z * r.z + r.w * r.w);
-                            if (qlen > 1e-6f) {
-                                r.x /= qlen; r.y /= qlen; r.z /= qlen; r.w /= qlen;
-                            } else {
-                                r = {0.0f, 0.0f, 0.0f, 1.0f};
+
+                            if (need_rot) {
+                                used_targets.insert({node_idx, "rotation"});
+
+                                std::vector<float> rot_vals;
+                                for (const auto& rot : track.rotations) {
+                                    Vec4 r = rot;
+                                    if (options.y_up && is_root) {
+                                        r = quat_mul(q_yup_conv, r);
+                                    }
+                                    float qlen = std::sqrt(r.x * r.x + r.y * r.y + r.z * r.z + r.w * r.w);
+                                    if (qlen > 1e-6f) {
+                                        r.x /= qlen; r.y /= qlen; r.z /= qlen; r.w /= qlen;
+                                    } else {
+                                        r = {0.0f, 0.0f, 0.0f, 1.0f};
+                                    }
+                                    rot_vals.push_back(r.x);
+                                    rot_vals.push_back(r.y);
+                                    rot_vals.push_back(r.z);
+                                    rot_vals.push_back(r.w);
+                                }
+                                uint32_t rv_bv = add_buffer_view(rot_vals.data(), rot_vals.size() * sizeof(float));
+                                uint32_t rv_acc = static_cast<uint32_t>(accessors.size());
+                                accessors.push_back({
+                                    {"bufferView", rv_bv}, {"byteOffset", 0}, {"componentType", 5126},
+                                    {"count", track.rotations.size()}, {"type", "VEC4"}
+                                });
+
+                                uint32_t s_rot = static_cast<uint32_t>(samplers.size());
+                                samplers.push_back({{"input", t_acc}, {"output", rv_acc}, {"interpolation", "LINEAR"}});
+                                channels.push_back({{"sampler", s_rot}, {"target", {{"node", node_idx}, {"path", "rotation"}}}});
                             }
-                            rot_vals.push_back(r.x);
-                            rot_vals.push_back(r.y);
-                            rot_vals.push_back(r.z);
-                            rot_vals.push_back(r.w);
+
+                            if (need_scale) {
+                                used_targets.insert({node_idx, "scale"});
+
+                                std::vector<float> scale_vals;
+                                for (const auto& m : track.scale_shears) {
+                                    float sx = m[0];
+                                    float sy = m[4];
+                                    float sz = m[8];
+                                    if (options.y_up && is_root) {
+                                        std::swap(sy, sz);
+                                    }
+                                    scale_vals.push_back(sx);
+                                    scale_vals.push_back(sy);
+                                    scale_vals.push_back(sz);
+                                }
+                                uint32_t sv_bv = add_buffer_view(scale_vals.data(), scale_vals.size() * sizeof(float));
+                                uint32_t sv_acc = static_cast<uint32_t>(accessors.size());
+                                accessors.push_back({
+                                    {"bufferView", sv_bv}, {"byteOffset", 0}, {"componentType", 5126},
+                                    {"count", track.scale_shears.size()}, {"type", "VEC3"}
+                                });
+
+                                uint32_t s_scale = static_cast<uint32_t>(samplers.size());
+                                samplers.push_back({{"input", t_acc}, {"output", sv_acc}, {"interpolation", "LINEAR"}});
+                                channels.push_back({{"sampler", s_scale}, {"target", {{"node", node_idx}, {"path", "scale"}}}});
+                            }
                         }
-                        uint32_t rv_bv = add_buffer_view(rot_vals.data(), rot_vals.size() * sizeof(float));
-                        uint32_t rv_acc = static_cast<uint32_t>(accessors.size());
-                        accessors.push_back({
-                            {"bufferView", rv_bv}, {"byteOffset", 0}, {"componentType", 5126},
-                            {"count", track.rotations.size()}, {"type", "VEC4"}
-                        });
-
-                        uint32_t s_tr = static_cast<uint32_t>(samplers.size());
-                        samplers.push_back({{"input", t_acc}, {"output", tv_acc}, {"interpolation", "LINEAR"}});
-                        add_channel(s_tr, node_idx, "translation");
-
-                        uint32_t s_rot = static_cast<uint32_t>(samplers.size());
-                        samplers.push_back({{"input", t_acc}, {"output", rv_acc}, {"interpolation", "LINEAR"}});
-                        add_channel(s_rot, node_idx, "rotation");
                     }
                 }
             }

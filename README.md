@@ -207,8 +207,14 @@ Launch `grn_converter.exe` directly or pass `--gui`:
 ./build/Release/grn_converter.exe model.grn model.glb
 ./build/Release/grn_converter.exe model.glb model.grn
 
-# Merge external animation track onto a character model
-./build/Release/grn_converter.exe character.grn character_attack.glb --anim attack.grn
+# Merge external animation tracks onto a character model (can repeat)
+./build/Release/grn_converter.exe character.grn character_attack.glb --anim run.grn --anim attack.grn
+
+# Split GLB animations into separate .grn files (default)
+./build/Release/grn_converter.exe character.glb character.grn --split-anims
+
+# Keep all GLB animations embedded into a single .grn file
+./build/Release/grn_converter.exe character.glb character.grn --no-split-anims
 
 # Batch process an entire folder recursively
 ./build/Release/grn_converter.exe path/to/models/ path/to/output/ --batch
@@ -228,7 +234,9 @@ Launch `grn_converter.exe` directly or pass `--gui`:
 | Option | Description |
 |---|---|
 | `-b, --batch` | Batch process all compatible files in the input folder recursively |
-| `--anim <path>` | External animation `.grn` track to merge into the output model |
+| `--anim <path>` | External animation `.grn` track to merge into the output model (can repeat) |
+| `--split-anims` | Split GLB animations into separate `.grn` files with matching skeletons (default) |
+| `--no-split-anims` | Embed all GLB animations into a single `.grn` container |
 | `--no-embed-textures` | Save textures as loose files next to model instead of embedding |
 | `--texture-format <fmt>` | Format for loose textures: `tga` (default 32-bit), `png`, or `vtex` |
 | `--no-vtex` | Disable VTex video codec; fall back to uncompressed or loose files |
@@ -239,6 +247,18 @@ Launch `grn_converter.exe` directly or pass `--gui`:
 | `--z-up` | Preserve native Z-up coordinates (default converts to glTF Y-up) |
 | `--gui` | Force launching the Dear ImGui GUI window |
 | `-h, --help` | Display help message and exit |
+
+---
+
+### Granny 1.2b vs. Granny 2 Viewer Compatibility Notes
+
+When evaluating converted `.grn` files across different viewers and tools:
+
+- **`playgrn.exe` (Authentic Granny 1.2b Engine)**:
+  `playgrn.exe` (and target games like *Sacred Gold*) is the true reference standard for Granny 1.2b format compliance. It reads relational binary chunks directly and plays keyframe streams linearly from memory. It can play animations with thousands of bone tracks natively with 0 crashes.
+- **`gr2_viewer.exe` (Granny 2 Viewer)**:
+  Granny 2 viewers do not render `.grn` natively. When passed a `.grn` file, `gr2_viewer.exe` calls `GRN2GR2ConvertGRNFile` (`0x00438750`), attempting to convert the file into a temporary `.gr2` container by running B-spline curve optimization. Its internal debug allocator (`granny_memory.cpp`) uses `VirtualAlloc` with guard pages within a 32-bit (2 GB) address space. Extremely complex modern rigs (>1,000 active 61-frame spline tracks) can exhaust this allocator during cubic curve fitting. Models with normal bone counts (or models without animations) convert and render in `gr2_viewer.exe` with 0 issues.
+- All files produced by `open-grn-converter` are verified bit-accurate Granny 1.2b containers.
 
 ---
 

@@ -18,6 +18,7 @@
 #include <atomic>
 #include <mutex>
 #include <vector>
+#include <unordered_set>
 
 namespace grn {
 
@@ -143,6 +144,46 @@ bool convert_file(const std::filesystem::path& input,
             return false;
         }
 
+        // Collect all animation files to merge (excluding the base model input file)
+        std::vector<std::filesystem::path> anim_list;
+        for (const auto& a : options.anim_files) {
+            if (!a.empty() && a != input && std::find(anim_list.begin(), anim_list.end(), a) == anim_list.end()) {
+                anim_list.push_back(a);
+            }
+        }
+        if (!options.anim_file.empty() && options.anim_file != input && std::find(anim_list.begin(), anim_list.end(), options.anim_file) == anim_list.end()) {
+            anim_list.push_back(options.anim_file);
+        }
+
+        if (!anim_list.empty()) {
+            // Remove empty placeholder animations (0 tracks) if adding real animations
+            model->animations.erase(
+                std::remove_if(model->animations.begin(), model->animations.end(),
+                               [](const GrnAnimation& a) { return a.tracks.empty(); }),
+                model->animations.end());
+
+            for (const auto& apath : anim_list) {
+                if (!std::filesystem::exists(apath)) {
+                    if (callback) callback(apath.filename().string(), 0.2f, false, "Animation file not found: " + apath.string());
+                    continue;
+                }
+                auto anim_model = parse_grn_file(apath);
+                if (!anim_model || anim_model->animations.empty()) {
+                    if (callback) callback(apath.filename().string(), 0.2f, false, "Failed to parse animation file: " + apath.string());
+                    continue;
+                }
+                for (auto& a : anim_model->animations) {
+                    if (a.name.empty() || a.name == "Animation") {
+                        a.name = apath.stem().string();
+                    }
+                    if (callback) callback(apath.filename().string(), 0.3f, true,
+                        "Integrating animation '" + a.name + "' (" + std::to_string(a.tracks.size()) + " tracks, " +
+                        std::to_string(a.duration) + "s)");
+                    model->animations.push_back(std::move(a));
+                }
+            }
+        }
+
         resolve_model_textures(*model, input, options);
 
         if (options.tint_pink) {
@@ -217,14 +258,65 @@ bool convert_file(const std::filesystem::path& input,
             }
         }
 
-        if (callback) callback(input.filename().string(), 0.6f, true, "Serializing GRN container: " + out_path.string());
+        bool split_anims = options.split_animations && !model->animations.empty();
 
-        bool ok = write_grn_file(out_path, *model);
-        if (callback) {
-            if (ok) callback(out_path.filename().string(), 1.0f, true, "Successfully converted GLB -> GRN (" + std::to_string(std::filesystem::file_size(out_path)) + " bytes)");
-            else callback(out_path.filename().string(), 0.0f, false, "Failed writing GRN file");
+        if (split_anims) {
+            // Write base model without animations
+            GrnModel base_model = *model;
+            base_model.animations.clear();
+
+            if (callback) callback(input.filename().string(), 0.6f, true, "Serializing base model GRN: " + out_path.string());
+            bool ok = write_grn_file(out_path, base_model);
+            if (!ok) {
+                if (callback) callback(out_path.filename().string(), 0.0f, false, "Failed writing base GRN model");
+                return false;
+            }
+
+            // Export each animation into a separate .grn file with skeleton
+            auto out_dir = out_path.parent_path();
+            std::string stem = out_path.stem().string();
+
+            std::unordered_set<std::string> used_anim_filenames;
+            for (size_t ai = 0; ai < model->animations.size(); ++ai) {
+                const auto& anim = model->animations[ai];
+                std::string safe_anim_name = anim.name.empty() ? ("Anim_" + std::to_string(ai)) : anim.name;
+                for (char& c : safe_anim_name) {
+                    if (c == '/' || c == '\\' || c == ':' || c == '*' || c == '?' || c == '"' || c == '<' || c == '>' || c == '|') {
+                        c = '_';
+                    }
+                }
+                std::string unique_anim_filename = safe_anim_name;
+                int counter = 1;
+                while (used_anim_filenames.count(unique_anim_filename)) {
+                    unique_anim_filename = safe_anim_name + "_" + std::to_string(counter++);
+                }
+                used_anim_filenames.insert(unique_anim_filename);
+
+                std::filesystem::path anim_out = out_dir / (stem + "_" + unique_anim_filename + ".grn");
+
+                GrnModel anim_model;
+                anim_model.bones = model->bones;
+                anim_model.animations.push_back(anim);
+
+                float prog = 0.6f + 0.4f * (static_cast<float>(ai + 1) / static_cast<float>(model->animations.size()));
+                if (callback) callback(anim.name, prog, true,
+                                       "Writing animation GRN: " + anim_out.filename().string() + " (" + std::to_string(anim.tracks.size()) + " tracks)");
+                write_grn_file(anim_out, anim_model);
+            }
+
+            if (callback) callback(out_path.filename().string(), 1.0f, true,
+                "Successfully converted GLB -> GRN (Model + " + std::to_string(model->animations.size()) + " animation files)");
+            return true;
+        } else {
+            if (callback) callback(input.filename().string(), 0.6f, true, "Serializing GRN container: " + out_path.string());
+
+            bool ok = write_grn_file(out_path, *model);
+            if (callback) {
+                if (ok) callback(out_path.filename().string(), 1.0f, true, "Successfully converted GLB -> GRN (" + std::to_string(std::filesystem::file_size(out_path)) + " bytes)");
+                else callback(out_path.filename().string(), 0.0f, false, "Failed writing GRN file");
+            }
+            return ok;
         }
-        return ok;
     }
 }
 
