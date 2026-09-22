@@ -2,7 +2,7 @@
   "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
   "name": "grn-converter",
   "version-string": "1.0.0",
-  "description": "GRN to glTF 2.0 / GLB bidirectional converter with Dear ImGui GUI and CLI",
+  "description": "GRN to glTF 2.0 / GLB bidirectional converter with Qt6 Qlementine GUI and CLI",
   "dependencies": [
     "nlohmann-json",
     "stb"
