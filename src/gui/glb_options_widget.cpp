@@ -33,6 +33,7 @@ struct GlbOptionsWidget::Impl {
     QDoubleSpinBox* targetHeightSpin{ nullptr };
     oclero::qlementine::Switch* vtexCompressSwitch{ nullptr };
     oclero::qlementine::Switch* splitAnimsSwitch{ nullptr };
+    oclero::qlementine::Switch* autoSplit16BitSwitch{ nullptr };
 
     QWidget* animSectionWidget{ nullptr };
     QLabel* animLabel{ nullptr };
@@ -124,6 +125,14 @@ struct GlbOptionsWidget::Impl {
             emit owner.optionsChanged();
         });
         optLayout->addRow(owner.tr("Split Animations:"), splitAnimsSwitch);
+
+        autoSplit16BitSwitch = new oclero::qlementine::Switch(optCard);
+        autoSplit16BitSwitch->setChecked(true);
+        autoSplit16BitSwitch->setToolTip(owner.tr("Automatically partition high-poly meshes (>64,000 vertices) to prevent Granny 1.2b 16-bit vertex overflow crashes"));
+        QObject::connect(autoSplit16BitSwitch, &oclero::qlementine::Switch::clicked, &owner, [this]() {
+            emit owner.optionsChanged();
+        });
+        optLayout->addRow(owner.tr("Auto-Split >65k Verts:"), autoSplit16BitSwitch);
 
         layout->addWidget(optCard);
 
@@ -237,6 +246,7 @@ struct GlbOptionsWidget::Impl {
         targetHeightSpin->setEnabled(false);
         vtexCompressSwitch->setChecked(true);
         splitAnimsSwitch->setChecked(true);
+        autoSplit16BitSwitch->setChecked(true);
         animSectionWidget->setVisible(true);
         bottomStretch->setVisible(false);
         rebuildTree();
@@ -277,6 +287,10 @@ bool GlbOptionsWidget::compressVTex() const {
 
 bool GlbOptionsWidget::splitAnimations() const {
     return _impl->splitAnimsSwitch->isChecked();
+}
+
+bool GlbOptionsWidget::autoSplit16Bit() const {
+    return _impl->autoSplit16BitSwitch->isChecked();
 }
 
 void GlbOptionsWidget::setSplitAnimations(bool split) {

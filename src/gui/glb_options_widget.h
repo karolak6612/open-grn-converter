@@ -20,6 +20,7 @@ public:
     float targetHeight() const;
     bool compressVTex() const;
     bool splitAnimations() const;
+    bool autoSplit16Bit() const;
 
     void setSplitAnimations(bool split);
     void reset();

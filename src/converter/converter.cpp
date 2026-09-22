@@ -10,6 +10,7 @@
 #include "../gltf/glb_reader.h"
 #include "../codecs/vtex_codec.h"
 #include "../codecs/tga_png.h"
+#include "mesh_optimizer.h"
 #include <algorithm>
 #include <iostream>
 #include <sstream>
@@ -258,6 +259,22 @@ bool convert_file(const std::filesystem::path& input,
                     }
                 }
             }
+        }
+
+        // 16-bit safe mesh partitioning & optimization
+        MeshOptimizerOptions opt_opts;
+        opt_opts.auto_split_16bit = options.auto_split_16bit;
+        opt_opts.max_vertices_per_part = options.max_vertices_16bit;
+        opt_opts.decimate = options.optimize_vertices;
+        opt_opts.max_total_vertices = options.max_vertices_16bit;
+
+        size_t orig_mesh_count = model->meshes.size();
+        optimize_model_meshes(*model, opt_opts);
+
+        if (model->meshes.size() > orig_mesh_count && callback) {
+            callback(input.filename().string(), 0.5f, true,
+                "Auto-partitioned high-poly mesh into " + std::to_string(model->meshes.size()) +
+                " 16-bit safe sub-meshes (≤" + std::to_string(options.max_vertices_16bit) + " vertices/mesh)");
         }
 
         bool split_anims = options.split_animations && !model->animations.empty();

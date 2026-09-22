@@ -5,6 +5,7 @@
   "description": "GRN to glTF 2.0 / GLB bidirectional converter with Qt6 Qlementine GUI and CLI",
   "dependencies": [
     "nlohmann-json",
-    "stb"
+    "stb",
+    "meshoptimizer"
   ]
 }

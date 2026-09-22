@@ -37,6 +37,9 @@ struct ConversionOptions {
     bool split_animations = true;     /**< When converting GLB to GRN, split animations into separate .grn files. */
     std::filesystem::path textures_dir; /**< Optional search directory for loose or pre-extracted textures. */
     std::filesystem::path output_path;/**< Optional explicit output path or directory. */
+    bool auto_split_16bit = true;     /**< Automatically partition meshes with >64k vertices into 16-bit safe sub-meshes. */
+    bool optimize_vertices = false;   /**< Apply quadric error decimation to reduce polygon count. */
+    uint32_t max_vertices_16bit = 64000; /**< Maximum vertex threshold per sub-mesh (default 64000). */
 };
 
 /**

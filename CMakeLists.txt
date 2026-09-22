@@ -34,6 +34,7 @@ endif()
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Svg Concurrent OpenGL OpenGLWidgets)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(Stb REQUIRED)
+find_package(meshoptimizer CONFIG REQUIRED)
 
 # Qlementine & Qlementine-Icons (Modern Fluent/macOS QStyle)
 include(FetchContent)
@@ -65,6 +66,7 @@ set(GRN_CORE_SOURCES
     src/gltf/glb_reader.cpp
     src/gltf/glb_writer.cpp
     src/converter/converter.cpp
+    src/converter/mesh_optimizer.cpp
 )
 
 set(GRN_CORE_HEADERS
@@ -78,6 +80,7 @@ set(GRN_CORE_HEADERS
     src/gltf/glb_writer.h
     src/converter/options.h
     src/converter/converter.h
+    src/converter/mesh_optimizer.h
 )
 
 add_library(grn_core STATIC
@@ -96,6 +99,7 @@ target_include_directories(grn_core
 target_link_libraries(grn_core
     PUBLIC
         nlohmann_json::nlohmann_json
+        meshoptimizer::meshoptimizer
 )
 
 # ---------------------------------------------------------------------------
@@ -118,6 +122,7 @@ set(GRN_APP_SOURCES
     src/gui/viewer/viewport_widget.cpp
     src/gui/viewer/model_viewer_panel.cpp
     src/gui/target_info_widget.cpp
+    src/gui/source_info_widget.cpp
 )
 
 set(GRN_APP_HEADERS
@@ -129,6 +134,7 @@ set(GRN_APP_HEADERS
     src/gui/log_drawer.h
     src/gui/section_card.h
     src/gui/gui_utils.h
+    src/gui/source_info_widget.h
     src/gui/target_info_widget.h
     src/gui/viewer/camera.h
     src/gui/viewer/grn_anim_sampler.h
@@ -243,6 +249,7 @@ add_grn_test(test_writer tests/test_writer.cpp)
 add_grn_test(test_roundtrip tests/test_roundtrip.cpp)
 add_grn_test(test_texture_hue tests/test_texture_hue.cpp)
 add_grn_test(test_viewer_compat tests/test_viewer_compat.cpp)
+add_grn_test(test_optimizer tests/test_optimizer.cpp)
 
 add_executable(test_viewer_engine
     tests/test_viewer_engine.cpp

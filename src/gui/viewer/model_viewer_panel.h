@@ -33,6 +33,8 @@ public:
 
     void setModelScale(float s);
     void setComparisonLayout(ComparisonLayout layout);
+    bool isSyncAnim() const;
+    void setSyncAnim(bool enabled);
 
     ViewportWidget* sourceViewport() const;
     ViewportWidget* targetViewport() const;

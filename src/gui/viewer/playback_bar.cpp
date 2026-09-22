@@ -6,7 +6,8 @@
 #include <QPushButton>
 #include <QSlider>
 #include <QLabel>
-#include <QComboBox>
+#include <QMenu>
+#include <QAction>
 
 namespace grn {
 
@@ -20,7 +21,8 @@ struct PlaybackBar::Impl {
     QPushButton* loopBtn{ nullptr };
     QSlider* timeSlider{ nullptr };
     QLabel* timeLabel{ nullptr };
-    QComboBox* speedCombo{ nullptr };
+    QPushButton* speedBtn{ nullptr };
+    float currentSpeed{ 1.0f };
 
     bool isPlaying{ false };
     bool isLooping{ true };
@@ -102,25 +104,55 @@ struct PlaybackBar::Impl {
         timeLabel->setFont(f);
         layout->addWidget(timeLabel);
 
-        // 6. Playback Speed Combo
-        speedCombo = new QComboBox(&owner);
-        speedCombo->addItems({"0.25x", "0.50x", "1.00x", "1.50x", "2.00x"});
-        speedCombo->setCurrentIndex(2); // 1.00x
-        speedCombo->setFixedHeight(24);
-        speedCombo->setFixedWidth(64);
-        speedCombo->setToolTip(owner.tr("Playback Speed"));
-        QObject::connect(speedCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), &owner, [this](int idx) {
-            float spd = 1.0f;
-            switch (idx) {
-                case 0: spd = 0.25f; break;
-                case 1: spd = 0.50f; break;
-                case 2: spd = 1.00f; break;
-                case 3: spd = 1.50f; break;
-                case 4: spd = 2.00f; break;
-            }
-            emit owner.speedChanged(spd);
-        });
-        layout->addWidget(speedCombo);
+        // 6. Playback Speed Button with Popup Menu
+        speedBtn = new QPushButton(owner.tr("1.00x"), &owner);
+        speedBtn->setFixedHeight(24);
+        speedBtn->setFixedWidth(66);
+        speedBtn->setCursor(Qt::PointingHandCursor);
+        speedBtn->setToolTip(owner.tr("Playback Speed"));
+        speedBtn->setStyleSheet(
+            "QPushButton {"
+            "  border: 1px solid rgba(0, 0, 0, 0.15);"
+            "  border-radius: 4px;"
+            "  padding: 2px 6px;"
+            "  background: rgba(0, 0, 0, 0.04);"
+            "  font-weight: 600;"
+            "  font-size: 11px;"
+            "}"
+            "QPushButton:hover:!disabled {"
+            "  background: rgba(0, 120, 215, 0.12);"
+            "  border-color: #0078d7;"
+            "  color: #0078d7;"
+            "}"
+            "QPushButton:pressed:!disabled {"
+            "  background: rgba(0, 120, 215, 0.24);"
+            "}"
+            "QPushButton:disabled {"
+            "  border-color: transparent;"
+            "  background: transparent;"
+            "  color: #aaaaaa;"
+            "}"
+        );
+
+        auto* speedMenu = new QMenu(speedBtn);
+        const std::vector<std::pair<QString, float>> speeds = {
+            { "0.25x", 0.25f },
+            { "0.50x", 0.50f },
+            { "1.00x", 1.00f },
+            { "1.50x", 1.50f },
+            { "2.00x", 2.00f }
+        };
+        for (const auto& [label, spd] : speeds) {
+            auto* act = speedMenu->addAction(label, [this, label, spd]() {
+                currentSpeed = spd;
+                speedBtn->setText(label);
+                emit owner.speedChanged(spd);
+            });
+            act->setCheckable(true);
+            if (spd == 1.00f) act->setChecked(true);
+        }
+        speedBtn->setMenu(speedMenu);
+        layout->addWidget(speedBtn);
 
         setEnabledState(false);
     }
@@ -140,7 +172,7 @@ struct PlaybackBar::Impl {
         rewindBtn->setEnabled(enabled);
         loopBtn->setEnabled(enabled);
         timeSlider->setEnabled(enabled);
-        speedCombo->setEnabled(enabled);
+        speedBtn->setEnabled(enabled);
         if (!enabled) {
             timeLabel->setText(owner.tr("0.00s / 0.00s"));
             timeSlider->setValue(0);
@@ -183,13 +215,14 @@ void PlaybackBar::setLooping(bool looping) {
 }
 
 void PlaybackBar::setSpeed(float speed) {
-    int idx = 2;
-    if (std::abs(speed - 0.25f) < 0.01f) idx = 0;
-    else if (std::abs(speed - 0.50f) < 0.01f) idx = 1;
-    else if (std::abs(speed - 1.00f) < 0.01f) idx = 2;
-    else if (std::abs(speed - 1.50f) < 0.01f) idx = 3;
-    else if (std::abs(speed - 2.00f) < 0.01f) idx = 4;
-    _impl->speedCombo->setCurrentIndex(idx);
+    _impl->currentSpeed = speed;
+    _impl->speedBtn->setText(QString("%1x").arg(speed, 0, 'f', 2));
+    if (auto* menu = _impl->speedBtn->menu()) {
+        for (auto* act : menu->actions()) {
+            bool matches = std::abs(act->text().remove('x').toFloat() - speed) < 0.05f;
+            act->setChecked(matches);
+        }
+    }
 }
 
 } // namespace grn

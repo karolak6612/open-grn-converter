@@ -5,6 +5,7 @@
 #include "log_drawer.h"
 #include "section_card.h"
 #include "gui_utils.h"
+#include "source_info_widget.h"
 #include "target_info_widget.h"
 #include "viewer/model_viewer_panel.h"
 #include "viewer/viewport_widget.h"
@@ -59,6 +60,7 @@ struct MainWindow::Impl {
     QSplitter* mainSplitter{ nullptr };
     QWidget* converterPanel{ nullptr };
     ModelViewerPanel* modelViewer{ nullptr };
+    SourceInfoWidget* sourceInfoWidget{ nullptr };
     TargetInfoWidget* targetInfoWidget{ nullptr };
     QAction* previewAction{ nullptr };
     QToolButton* previewToggleBtn{ nullptr };
@@ -220,6 +222,9 @@ struct MainWindow::Impl {
         if (targetInfoWidget) {
             targetInfoWidget->clearTarget();
         }
+        if (sourceInfoWidget) {
+            sourceInfoWidget->clearSource();
+        }
         if (modelViewer) {
             modelViewer->loadTargetModel(nullptr, QString());
         }
@@ -316,10 +321,34 @@ struct MainWindow::Impl {
 
     void setupConvertButton() {
         convertBtn = new QPushButton(makeThemedIcon(Icons16::Action_Run), owner.tr("Convert Model"), &owner);
-        convertBtn->setFixedHeight(32);
+        convertBtn->setFixedHeight(36);
+        convertBtn->setCursor(Qt::PointingHandCursor);
         QFont f = convertBtn->font();
         f.setBold(true);
+        f.setPointSize(10);
         convertBtn->setFont(f);
+        convertBtn->setStyleSheet(
+            "QPushButton {"
+            "  background-color: #0078d7;"
+            "  color: #ffffff;"
+            "  border: 1px solid #005a9e;"
+            "  border-radius: 5px;"
+            "  padding: 4px 16px;"
+            "  font-weight: 700;"
+            "}"
+            "QPushButton:hover:!disabled {"
+            "  background-color: #1a88e1;"
+            "  border-color: #0078d7;"
+            "}"
+            "QPushButton:pressed:!disabled {"
+            "  background-color: #005a9e;"
+            "}"
+            "QPushButton:disabled {"
+            "  background-color: rgba(0, 120, 215, 0.25);"
+            "  color: rgba(255, 255, 255, 0.6);"
+            "  border-color: transparent;"
+            "}"
+        );
         QObject::connect(convertBtn, &QPushButton::clicked, &owner, [this]() { executeConversion(); });
     }
 
@@ -383,12 +412,15 @@ struct MainWindow::Impl {
         converterPanel->setMinimumWidth(320);
         converterPanel->setMaximumWidth(420);
 
+        sourceInfoWidget = new SourceInfoWidget(&owner);
+
         auto* convLayout = new QVBoxLayout(converterPanel);
         convLayout->setContentsMargins(8, 4, 8, 4);
         convLayout->setSpacing(6);
         convLayout->addWidget(navBar);
         convLayout->addWidget(oclero::qlementine::makeHorizontalLine(&owner));
         convLayout->addWidget(fileBoxWidget);
+        convLayout->addWidget(sourceInfoWidget);
         convLayout->addWidget(optionsStack, 1);
         convLayout->addWidget(convertBtn);
         convLayout->addWidget(logDrawer);
@@ -503,8 +535,15 @@ struct MainWindow::Impl {
         if (loadedModel) {
             QFileInfo fi(path);
             modelViewer->loadSourceModel(&*loadedModel, fi.fileName());
+            if (sourceInfoWidget) {
+                bool isGrn = (navBar->currentIndex() == 0);
+                sourceInfoWidget->setSourceModel(&*loadedModel, path, isGrn);
+            }
         } else {
             modelViewer->loadSourceModel(nullptr, QString());
+            if (sourceInfoWidget) {
+                sourceInfoWidget->clearSource();
+            }
         }
         updateViewerScale();
     }
@@ -794,6 +833,7 @@ struct MainWindow::Impl {
             }
             opts.vtex_enabled = glbOptions->compressVTex();
             opts.split_animations = glbOptions->splitAnimations();
+            opts.auto_split_16bit = glbOptions->autoSplit16Bit();
         }
 
         progressBar->setValue(0);

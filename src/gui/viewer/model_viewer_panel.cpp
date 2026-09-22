@@ -23,9 +23,8 @@ struct ModelViewerPanel::Impl {
     QComboBox* shadingCombo{ nullptr };
     QPushButton* wireBtn{ nullptr };
     QPushButton* gridBtn{ nullptr };
-    QPushButton* frameBtn{ nullptr };
     QPushButton* syncCamBtn{ nullptr };
-    QPushButton* detachBtn{ nullptr };
+    QPushButton* syncAnimBtn{ nullptr };
     QPushButton* closeBtn{ nullptr };
 
     QSplitter* splitter{ nullptr };
@@ -54,16 +53,8 @@ struct ModelViewerPanel::Impl {
 
         // --- 1. Top Header Toolbar ---
         auto* headerLayout = new QHBoxLayout();
-        headerLayout->setContentsMargins(4, 2, 4, 2);
-        headerLayout->setSpacing(6);
-
-        auto* titleLabel = new QLabel(owner.tr("Comparison 3D Viewport"), &owner);
-        QFont hf = titleLabel->font();
-        hf.setBold(true);
-        titleLabel->setFont(hf);
-        headerLayout->addWidget(titleLabel);
-
-        headerLayout->addStretch(1);
+        headerLayout->setContentsMargins(2, 2, 2, 2);
+        headerLayout->setSpacing(4);
 
         // Layout mode combo
         layoutCombo = new QComboBox(&owner);
@@ -124,6 +115,7 @@ struct ModelViewerPanel::Impl {
             targetViewport->setShowGrid(chk);
         });
         headerLayout->addWidget(gridBtn);
+        headerLayout->addStretch(1);
 
         // Sync camera toggle
         syncCamBtn = new QPushButton(makeThemedIcon(Icons16::Action_Refresh), owner.tr("Sync Cam"), &owner);
@@ -133,24 +125,13 @@ struct ModelViewerPanel::Impl {
         syncCamBtn->setToolTip(owner.tr("Synchronize camera orbit, pan, and zoom between viewports"));
         headerLayout->addWidget(syncCamBtn);
 
-        // Frame Bounds
-        frameBtn = new QPushButton(makeThemedIcon(Icons16::Action_Enlarge), owner.tr("Frame"), &owner);
-        frameBtn->setFixedHeight(24);
-        frameBtn->setToolTip(owner.tr("Fit both models inside camera view"));
-        QObject::connect(frameBtn, &QPushButton::clicked, &owner, [this]() {
-            sourceViewport->frameBounds();
-            targetViewport->frameBounds();
-        });
-        headerLayout->addWidget(frameBtn);
-
-        // Detach / Pop Out
-        detachBtn = new QPushButton(makeThemedIcon(Icons16::Action_ExternalLink), QString(), &owner);
-        detachBtn->setFixedSize(24, 24);
-        detachBtn->setToolTip(owner.tr("Pop out to separate window"));
-        QObject::connect(detachBtn, &QPushButton::clicked, &owner, [this]() {
-            emit owner.detachRequested();
-        });
-        headerLayout->addWidget(detachBtn);
+        // Sync anim toggle
+        syncAnimBtn = new QPushButton(makeThemedIcon(Icons16::Action_Refresh), owner.tr("Sync Anim"), &owner);
+        syncAnimBtn->setCheckable(true);
+        syncAnimBtn->setChecked(true);
+        syncAnimBtn->setFixedHeight(24);
+        syncAnimBtn->setToolTip(owner.tr("Synchronize animation playback and timeline between viewports"));
+        headerLayout->addWidget(syncAnimBtn);
 
         mainLayout->addLayout(headerLayout);
 
@@ -241,23 +222,33 @@ struct ModelViewerPanel::Impl {
 
         QObject::connect(playbackBar, &PlaybackBar::playToggled, &owner, [this](bool p) {
             sourceViewport->setPlaying(p);
-            targetViewport->setPlaying(p);
+            if (syncAnimBtn && syncAnimBtn->isChecked()) {
+                targetViewport->setPlaying(p);
+            }
         });
         QObject::connect(playbackBar, &PlaybackBar::rewindClicked, &owner, [this]() {
             sourceViewport->setTime(0.0f);
-            targetViewport->setTime(0.0f);
+            if (syncAnimBtn && syncAnimBtn->isChecked()) {
+                targetViewport->setTime(0.0f);
+            }
         });
         QObject::connect(playbackBar, &PlaybackBar::loopToggled, &owner, [this](bool l) {
             sourceViewport->setLooping(l);
-            targetViewport->setLooping(l);
+            if (syncAnimBtn && syncAnimBtn->isChecked()) {
+                targetViewport->setLooping(l);
+            }
         });
         QObject::connect(playbackBar, &PlaybackBar::timeSeeked, &owner, [this](float t) {
             sourceViewport->setTime(t);
-            targetViewport->setTime(t);
+            if (syncAnimBtn && syncAnimBtn->isChecked()) {
+                targetViewport->setTime(t);
+            }
         });
         QObject::connect(playbackBar, &PlaybackBar::speedChanged, &owner, [this](float spd) {
             sourceViewport->setPlaybackSpeed(spd);
-            targetViewport->setPlaybackSpeed(spd);
+            if (syncAnimBtn && syncAnimBtn->isChecked()) {
+                targetViewport->setPlaybackSpeed(spd);
+            }
         });
 
         // Model loading badge update
@@ -356,6 +347,16 @@ void ModelViewerPanel::setModelScale(float s) {
 void ModelViewerPanel::setComparisonLayout(ComparisonLayout layout) {
     _impl->layoutCombo->setCurrentIndex(static_cast<int>(layout));
     _impl->updateLayoutMode(layout);
+}
+
+bool ModelViewerPanel::isSyncAnim() const {
+    return _impl->syncAnimBtn && _impl->syncAnimBtn->isChecked();
+}
+
+void ModelViewerPanel::setSyncAnim(bool enabled) {
+    if (_impl->syncAnimBtn) {
+        _impl->syncAnimBtn->setChecked(enabled);
+    }
 }
 
 ViewportWidget* ModelViewerPanel::sourceViewport() const {
