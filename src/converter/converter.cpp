@@ -205,7 +205,9 @@ bool convert_file(const std::filesystem::path& input,
 
         bool ok = export_grn_to_glb_file(out_path, *model, exp_opt);
         if (callback) {
-            if (ok) callback(out_path.filename().string(), 1.0f, true, "Successfully converted GRN -> GLB (" + std::to_string(std::filesystem::file_size(out_path)) + " bytes)");
+            std::error_code ec;
+            auto fsz = std::filesystem::file_size(out_path, ec);
+            if (ok) callback(out_path.filename().string(), 1.0f, true, "Successfully converted GRN -> GLB (" + std::to_string(ec ? 0 : fsz) + " bytes)");
             else callback(out_path.filename().string(), 0.0f, false, "Failed writing GLB file");
         }
         return ok;

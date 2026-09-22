@@ -1,11 +1,17 @@
 /**
  * @file main.cpp
- * @brief Main entry point for grn_converter, dispatching between CLI and GUI modes.
+ * @brief Main entry point for grn_converter, dispatching between CLI and Qt6 GUI modes.
  */
 
 #include "cli/cli_main.h"
-#include "gui/app.h"
+#include "gui/main_window.h"
+
+#include <QApplication>
+#include <oclero/qlementine/style/QlementineStyle.hpp>
+#include <oclero/qlementine/style/ThemeManager.hpp>
+#include <oclero/qlementine/icons/QlementineIcons.hpp>
 #include <string>
+#include <fstream>
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -14,22 +20,117 @@
 #include <windows.h>
 #include <cstdio>
 #include <iostream>
+#include <io.h>
+#include <fcntl.h>
 #endif
 
 int main(int argc, char* argv[]) {
     // Check if GUI mode should be launched
     bool force_gui = false;
+    std::string screenshot_path;
+    std::string initial_theme = "Light";
+    std::string preloaded_model;
+    bool auto_convert = false;
+    std::optional<bool> split_anims_opt;
+    std::optional<bool> embed_anims_opt;
+    std::optional<bool> embed_textures_opt;
+    std::optional<int> active_tab_opt;
     for (int i = 1; i < argc; ++i) {
-        if (std::string(argv[i]) == "--gui") {
+        std::string arg = argv[i];
+        if (arg == "--gui") {
             force_gui = true;
-            break;
+        } else if (arg == "--screenshot" && i + 1 < argc) {
+            screenshot_path = argv[++i];
+            force_gui = true;
+        } else if (arg == "--theme" && i + 1 < argc) {
+            initial_theme = argv[++i];
+        } else if (arg == "--model" && i + 1 < argc) {
+            preloaded_model = argv[++i];
+            force_gui = true;
+        } else if (arg == "--convert") {
+            auto_convert = true;
+            force_gui = true;
+        } else if (arg == "--split-anims" && i + 1 < argc) {
+            split_anims_opt = (std::string(argv[++i]) != "0");
+        } else if (arg == "--embed-anims" && i + 1 < argc) {
+            embed_anims_opt = (std::string(argv[++i]) != "0");
+        } else if (arg == "--embed-textures" && i + 1 < argc) {
+            embed_textures_opt = (std::string(argv[++i]) != "0");
+        } else if (arg == "--tab" && i + 1 < argc) {
+            active_tab_opt = std::stoi(argv[++i]);
         }
     }
 
     if (argc == 1 || force_gui) {
-        // Launch Dear ImGui GUI mode
-        grn::App app;
-        return app.run();
+        QApplication::setHighDpiScaleFactorRoundingPolicy(Qt::HighDpiScaleFactorRoundingPolicy::PassThrough);
+        QApplication app(argc, argv);
+
+        QGuiApplication::setApplicationDisplayName("GRN <-> GLB Converter");
+        QCoreApplication::setApplicationName("grn-converter");
+        QCoreApplication::setOrganizationName("open-grn-converter");
+        QCoreApplication::setApplicationVersion("1.0.0");
+
+        // Custom Qlementine Style
+        auto* style = new oclero::qlementine::QlementineStyle(&app);
+        style->setAnimationsEnabled(true);
+        style->setAutoIconColor(oclero::qlementine::AutoIconColor::TextColor);
+        style->setIconPathGetter(oclero::qlementine::icons::fromFreeDesktop);
+        app.setStyle(style);
+
+        // Custom icon theme
+        oclero::qlementine::icons::initializeIconTheme();
+        QIcon::setThemeName("qlementine");
+
+        // Theme manager
+        auto* themeManager = new oclero::qlementine::ThemeManager(style);
+        themeManager->loadDirectory(":/themes");
+        themeManager->setCurrentTheme(QString::fromStdString(initial_theme));
+
+        grn::MainWindow window(themeManager);
+        if (!preloaded_model.empty()) {
+            window.openPath(QString::fromStdString(preloaded_model));
+        }
+        if (split_anims_opt.has_value()) {
+            window.setSplitAnims(*split_anims_opt);
+        }
+        if (embed_anims_opt.has_value()) {
+            window.setEmbedAnims(*embed_anims_opt);
+        }
+        if (embed_textures_opt.has_value()) {
+            window.setEmbedTextures(*embed_textures_opt);
+        }
+        if (active_tab_opt.has_value()) {
+            window.setActiveTab(*active_tab_opt);
+        }
+        window.show();
+        app.processEvents();
+
+        if (auto_convert) {
+            window.executeConversion();
+            while (window.isConverting()) {
+                app.processEvents();
+#ifdef _WIN32
+                Sleep(20);
+#endif
+            }
+            for (int f = 0; f < 10; ++f) {
+                app.processEvents();
+            }
+        }
+
+        if (!screenshot_path.empty()) {
+            for (int f = 0; f < 30; ++f) {
+                app.processEvents();
+#ifdef _WIN32
+                Sleep(10);
+#endif
+            }
+            QPixmap pixmap = window.grab();
+            pixmap.save(QString::fromStdString(screenshot_path), "PNG");
+            return 0;
+        }
+
+        return app.exec();
     }
 
 #ifdef _WIN32
@@ -53,5 +154,10 @@ int main(int argc, char* argv[]) {
 #endif
 
     // Launch headless CLI mode
-    return grn::run_cli(argc, argv);
+    int ret = grn::run_cli(argc, argv);
+    std::cout.flush();
+    std::cerr.flush();
+    fflush(stdout);
+    fflush(stderr);
+    return ret;
 }

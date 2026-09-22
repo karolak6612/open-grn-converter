@@ -4,16 +4,7 @@
   "version-string": "1.0.0",
   "description": "GRN to glTF 2.0 / GLB bidirectional converter with Dear ImGui GUI and CLI",
   "dependencies": [
-    "glfw3",
-    {
-      "name": "imgui",
-      "features": [
-        "glfw-binding",
-        "opengl3-binding"
-      ]
-    },
     "nlohmann-json",
-    "stb",
-    "glad"
+    "stb"
   ]
 }

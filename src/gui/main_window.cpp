@@ -1,0 +1,513 @@
+#include "main_window.h"
+#include "conversion_worker.h"
+#include "grn_options_widget.h"
+#include "glb_options_widget.h"
+#include "log_drawer.h"
+#include "section_card.h"
+#include "gui_utils.h"
+
+#include <oclero/qlementine/style/QlementineStyle.hpp>
+#include <oclero/qlementine/style/ThemeManager.hpp>
+#include <oclero/qlementine/utils/IconUtils.hpp>
+#include <oclero/qlementine/utils/WidgetUtils.hpp>
+
+#include <oclero/qlementine/widgets/LineEdit.hpp>
+#include <oclero/qlementine/widgets/NavigationBar.hpp>
+#include <oclero/qlementine/widgets/AboutDialog.hpp>
+#include <oclero/qlementine/widgets/LoadingSpinner.hpp>
+#include <oclero/qlementine/icons/Icons16.hpp>
+
+#include <QPointer>
+#include <QVBoxLayout>
+#include <QHBoxLayout>
+#include <QFormLayout>
+#include <QStackedWidget>
+#include <QMenuBar>
+#include <QToolButton>
+#include <QStatusBar>
+#include <QProgressBar>
+#include <QLabel>
+#include <QPushButton>
+#include <QFileDialog>
+#include <QFileInfo>
+#include <QDragEnterEvent>
+#include <QDropEvent>
+#include <QMimeData>
+#include <QClipboard>
+#include <QApplication>
+#include <QGroupBox>
+#include <QFrame>
+
+namespace grn {
+
+using Icons16 = oclero::qlementine::icons::Icons16;
+
+struct MainWindow::Impl {
+    MainWindow& owner;
+    QPointer<oclero::qlementine::ThemeManager> themeManager;
+    ConversionWorker* worker{ nullptr };
+
+    // Layout
+    QVBoxLayout* rootLayout{ nullptr };
+    QMenuBar* menuBar{ nullptr };
+    QStatusBar* statusBar{ nullptr };
+    QLabel* statusLabel{ nullptr };
+    oclero::qlementine::LoadingSpinner* spinner{ nullptr };
+    QProgressBar* progressBar{ nullptr };
+    QToolButton* logDrawerBtn{ nullptr };
+
+    // Top Navigation Tabs (Qlementine NavigationBar with underline indicator)
+    oclero::qlementine::NavigationBar* navBar{ nullptr };
+
+    // Source & Destination
+    oclero::qlementine::LineEdit* inputEdit{ nullptr };
+    oclero::qlementine::LineEdit* outputEdit{ nullptr };
+    QPushButton* browseFileBtn{ nullptr };
+    QPushButton* browseOutBtn{ nullptr };
+
+    // Stacked Options
+    QStackedWidget* optionsStack{ nullptr };
+    GrnOptionsWidget* grnOptions{ nullptr };
+    GlbOptionsWidget* glbOptions{ nullptr };
+    QPushButton* convertBtn{ nullptr };
+
+    // Bottom Tray: Log Drawer
+    LogDrawer* logDrawer{ nullptr };
+
+    Impl(MainWindow& o, oclero::qlementine::ThemeManager* tm)
+        : owner(o)
+        , themeManager(tm) {}
+
+    void setupUI() {
+        worker = new ConversionWorker(&owner);
+        QObject::connect(worker, &ConversionWorker::progressUpdated, &owner, [this](float p) {
+            onProgress(p);
+        });
+        QObject::connect(worker, &ConversionWorker::logMessage, &owner, [this](const QString& msg, int lvl) {
+            onLog(msg, lvl);
+        });
+        QObject::connect(worker, &ConversionWorker::conversionFinished, &owner, [this](bool ok, const QString& summary) {
+            onFinished(ok, summary);
+        });
+
+        setupMenuBar();
+        setupNavBar();
+        setupSourceAndDestination();
+        setupOptionsStack();
+        setupConvertButton();
+        setupStatusBar();
+        setupLogDrawer();
+        setupLayout();
+
+        updateActionState();
+        updateModelInOptions();
+    }
+
+    void setupMenuBar() {
+        menuBar = new QMenuBar(nullptr);
+
+        auto* fileMenu = menuBar->addMenu(owner.tr("&File"));
+        fileMenu->addAction(makeThemedIcon(Icons16::Document_Open), owner.tr("Open &File..."), QKeySequence::Open, [this]() {
+            browseInput();
+        });
+        fileMenu->addSeparator();
+        fileMenu->addAction(makeThemedIcon(Icons16::Action_Close), owner.tr("E&xit"),
+                            QKeySequence(Qt::CTRL | Qt::Key_Q), []() {
+            qApp->quit();
+        });
+
+        auto* editMenu = menuBar->addMenu(owner.tr("&Edit"));
+        editMenu->addAction(makeThemedIcon(Icons16::Action_Reset), owner.tr("&Reset Settings"), [this]() {
+            resetOptions();
+        });
+        editMenu->addAction(makeThemedIcon(Icons16::Action_Copy), owner.tr("&Copy Log"), QKeySequence::Copy, [this]() {
+            QApplication::clipboard()->setText(logDrawer->allText());
+        });
+        editMenu->addAction(makeThemedIcon(Icons16::Action_Trash), owner.tr("&Clear Log"), [this]() {
+            logDrawer->clearLog();
+        });
+
+        auto* helpMenu = menuBar->addMenu(owner.tr("&Help"));
+        helpMenu->addAction(makeThemedIcon(Icons16::Misc_Help), owner.tr("&About GRN Converter..."), [this]() {
+            oclero::qlementine::AboutDialog dlg(&owner);
+            dlg.setApplicationName(owner.tr("GRN <-> GLB Converter"));
+            dlg.setDescription(owner.tr("Production C++20 Bidirectional Granny 1.2b and glTF 2.0 Converter.\n"
+                                        "Engineered with Qt6 and Qlementine Modern Theme."));
+            dlg.setApplicationVersion("1.0.0");
+            dlg.exec();
+        });
+    }
+
+    void setupNavBar() {
+        navBar = new oclero::qlementine::NavigationBar(&owner);
+        navBar->setFocusPolicy(Qt::NoFocus);
+        navBar->setItemsShouldExpand(true);
+        navBar->addItem(owner.tr("GRN → GLB"), QIcon());
+        navBar->addItem(owner.tr("GLB → GRN"), QIcon());
+        navBar->setCurrentIndex(0);
+
+        QObject::connect(navBar, &oclero::qlementine::NavigationBar::currentIndexChanged, &owner, [this]() {
+            int idx = navBar->currentIndex();
+            optionsStack->setCurrentIndex(idx);
+            updateActionState();
+            updateModelInOptions();
+        });
+    }
+
+    QWidget* fileBoxWidget{ nullptr };
+
+    void setupSourceAndDestination() {
+        auto* srcDestContainer = new QWidget(&owner);
+        fileBoxWidget = srcDestContainer;
+
+        auto* fileLayout = new QVBoxLayout(srcDestContainer);
+        fileLayout->setContentsMargins(0, 0, 0, 0);
+        fileLayout->setSpacing(4);
+
+        auto* srcDestLabel = new QLabel(owner.tr("Source & Destination"), srcDestContainer);
+        QFont hf = srcDestLabel->font();
+        hf.setBold(true);
+        srcDestLabel->setFont(hf);
+        fileLayout->addWidget(srcDestLabel);
+
+        auto* card = new SectionCard(srcDestContainer);
+        auto* formLayout = new QFormLayout(card);
+        formLayout->setContentsMargins(10, 8, 10, 8);
+        formLayout->setVerticalSpacing(4);
+        formLayout->setHorizontalSpacing(6);
+
+        // Source row: single file only
+        auto* inRow = new QHBoxLayout();
+        inRow->setContentsMargins(0, 0, 0, 0);
+        inRow->setSpacing(2);
+        inputEdit = new oclero::qlementine::LineEdit(card);
+        inputEdit->setPlaceholderText(owner.tr("Select or drop .grn / .glb model..."));
+        inputEdit->setClearButtonEnabled(true);
+        inputEdit->setFixedHeight(24);
+        QObject::connect(inputEdit, &oclero::qlementine::LineEdit::textChanged, &owner, [this]() {
+            onInputPathChanged();
+        });
+        inRow->addWidget(inputEdit, 1);
+
+        browseFileBtn = new QPushButton(makeThemedIcon(Icons16::Document_Open), QString(), card);
+        browseFileBtn->setToolTip(owner.tr("Browse 3D model file (.grn, .glb)..."));
+        browseFileBtn->setFixedSize(24, 24);
+        QObject::connect(browseFileBtn, &QPushButton::clicked, &owner, [this]() { browseInput(); });
+        inRow->addWidget(browseFileBtn);
+        formLayout->addRow(owner.tr("Source:"), inRow);
+
+        // Output row: always folder
+        auto* outRow = new QHBoxLayout();
+        outRow->setContentsMargins(0, 0, 0, 0);
+        outRow->setSpacing(2);
+        outputEdit = new oclero::qlementine::LineEdit(card);
+        outputEdit->setPlaceholderText(owner.tr("Select target output folder..."));
+        outputEdit->setClearButtonEnabled(true);
+        outputEdit->setFixedHeight(24);
+        outRow->addWidget(outputEdit, 1);
+
+        browseOutBtn = new QPushButton(makeThemedIcon(Icons16::File_FolderOpen), QString(), card);
+        browseOutBtn->setToolTip(owner.tr("Browse target destination folder..."));
+        browseOutBtn->setFixedSize(24, 24);
+        QObject::connect(browseOutBtn, &QPushButton::clicked, &owner, [this]() { browseOutput(); });
+        outRow->addWidget(browseOutBtn);
+        formLayout->addRow(owner.tr("Output:"), outRow);
+
+        fileLayout->addWidget(card);
+    }
+
+    void setupOptionsStack() {
+        optionsStack = new QStackedWidget(&owner);
+
+        grnOptions = new GrnOptionsWidget(optionsStack);
+        QObject::connect(grnOptions, &GrnOptionsWidget::animFilesChanged, &owner, [this]() {
+            updateBadges();
+        });
+        optionsStack->addWidget(grnOptions);
+
+        glbOptions = new GlbOptionsWidget(optionsStack);
+        optionsStack->addWidget(glbOptions);
+    }
+
+    void setupConvertButton() {
+        convertBtn = new QPushButton(makeThemedIcon(Icons16::Action_Run), owner.tr("Convert Model"), &owner);
+        convertBtn->setFixedHeight(32);
+        QFont f = convertBtn->font();
+        f.setBold(true);
+        convertBtn->setFont(f);
+        QObject::connect(convertBtn, &QPushButton::clicked, &owner, [this]() { executeConversion(); });
+    }
+
+    void setupStatusBar() {
+        statusBar = new QStatusBar(&owner);
+        statusBar->setSizeGripEnabled(false);
+
+        statusLabel = new QLabel(owner.tr("Ready"), statusBar);
+        statusLabel->setStyleSheet("color: #888888;");
+        statusBar->addWidget(statusLabel, 1);
+
+        spinner = new oclero::qlementine::LoadingSpinner(statusBar);
+        spinner->setSpinning(false);
+        statusBar->addPermanentWidget(spinner);
+
+        progressBar = new QProgressBar(statusBar);
+        progressBar->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+        progressBar->setFixedWidth(50);
+        progressBar->setFixedHeight(8);
+        progressBar->setRange(0, 100);
+        progressBar->setValue(0);
+        progressBar->setTextVisible(false);
+        progressBar->setVisible(false);
+        statusBar->addPermanentWidget(progressBar);
+
+        logDrawerBtn = new QToolButton(statusBar);
+        logDrawerBtn->setText(owner.tr("Log (0)"));
+        logDrawerBtn->setToolButtonStyle(Qt::ToolButtonTextOnly);
+        logDrawerBtn->setCheckable(true);
+        logDrawerBtn->setChecked(false);
+        QObject::connect(logDrawerBtn, &QToolButton::toggled, &owner, [this](bool chk) {
+            logDrawer->setVisible(chk);
+        });
+        statusBar->addPermanentWidget(logDrawerBtn);
+    }
+
+    void setupLogDrawer() {
+        logDrawer = new LogDrawer(&owner);
+        logDrawer->setVisible(false);
+        QObject::connect(logDrawer, &LogDrawer::entryCountChanged, &owner, [this](size_t count) {
+            if (logDrawerBtn) {
+                logDrawerBtn->setText(QString("Log (%1)").arg(count));
+            }
+        });
+        logDrawer->appendLog(owner.tr("GRN Converter ready."));
+    }
+
+    void setupLayout() {
+        rootLayout = new QVBoxLayout(&owner);
+        rootLayout->setContentsMargins(8, 0, 8, 0);
+        rootLayout->setSpacing(6);
+        rootLayout->setMenuBar(menuBar);
+        rootLayout->addWidget(navBar);
+        rootLayout->addWidget(oclero::qlementine::makeHorizontalLine(&owner));
+        rootLayout->addWidget(fileBoxWidget);
+        rootLayout->addWidget(optionsStack, 1);
+        rootLayout->addWidget(convertBtn);
+        rootLayout->addWidget(logDrawer);
+        rootLayout->addWidget(statusBar);
+    }
+
+    void onInputPathChanged() {
+        QString path = inputEdit->text().trimmed();
+        if (!path.isEmpty()) {
+            QFileInfo fi(path);
+            if (fi.isFile()) {
+                if (outputEdit->text().isEmpty()) {
+                    outputEdit->setText(fi.dir().absolutePath());
+                }
+
+                QString ext = fi.suffix().toLower();
+                if (ext == "grn") {
+                    navBar->blockSignals(true);
+                    navBar->setCurrentIndex(0); // Switch to GRN -> GLB
+                    optionsStack->setCurrentIndex(0);
+                    navBar->blockSignals(false);
+                } else if (ext == "glb" || ext == "gltf") {
+                    navBar->blockSignals(true);
+                    navBar->setCurrentIndex(1); // Switch to GLB -> GRN
+                    optionsStack->setCurrentIndex(1);
+                    navBar->blockSignals(false);
+                }
+            }
+        }
+        updateActionState();
+        updateModelInOptions();
+    }
+
+    void updateModelInOptions() {
+        QString path = inputEdit->text().trimmed();
+        grnOptions->setModel(path);
+        glbOptions->setModel(path);
+        updateBadges();
+    }
+
+    void updateBadges() {
+        if (navBar->currentIndex() == 0) {
+            auto anims = grnOptions->externalAnimFiles();
+            navBar->setItemBadge(0, anims.empty() ? QString() : QString::number(anims.size()));
+            navBar->setItemBadge(1, QString());
+        } else {
+            navBar->setItemBadge(0, QString());
+        }
+    }
+
+    void updateActionState() {
+        QString inPath = inputEdit->text().trimmed();
+        bool hasInput = !inPath.isEmpty();
+        bool running = worker && worker->isRunning();
+
+        convertBtn->setEnabled(hasInput && !running);
+        inputEdit->setEnabled(!running);
+        outputEdit->setEnabled(!running);
+        navBar->setEnabled(!running);
+        grnOptions->setEnabled(!running);
+        glbOptions->setEnabled(!running);
+
+        if (running) {
+            convertBtn->setText(owner.tr("Converting..."));
+            spinner->setSpinning(true);
+        } else {
+            convertBtn->setText(owner.tr("Convert Model"));
+            spinner->setSpinning(false);
+        }
+    }
+
+    void browseInput() {
+        bool toGlb = (navBar->currentIndex() == 0);
+        QString filter = toGlb
+            ? owner.tr("Granny 1.2b (*.grn);;glTF Binary (*.glb *.gltf);;All Files (*.*)")
+            : owner.tr("glTF Binary (*.glb *.gltf);;Granny 1.2b (*.grn);;All Files (*.*)");
+        QString file = QFileDialog::getOpenFileName(&owner, owner.tr("Select 3D Model File"), inputEdit->text(), filter);
+        if (!file.isEmpty()) {
+            inputEdit->setText(file);
+        }
+    }
+
+    void browseOutput() {
+        QString dir = QFileDialog::getExistingDirectory(&owner, owner.tr("Select Target Output Folder"), outputEdit->text());
+        if (!dir.isEmpty()) {
+            outputEdit->setText(dir);
+        }
+    }
+
+    void resetOptions() {
+        grnOptions->reset();
+        glbOptions->reset();
+        updateModelInOptions();
+    }
+
+    void executeConversion() {
+        QString inPath = inputEdit->text().trimmed();
+        if (inPath.isEmpty()) return;
+
+        QFileInfo fi(inPath);
+        QString outDir = outputEdit->text().trimmed();
+        if (outDir.isEmpty()) {
+            outDir = fi.dir().absolutePath();
+            outputEdit->setText(outDir);
+        }
+
+        bool isGrnToGlb = (navBar->currentIndex() == 0);
+        QString outFileName = fi.completeBaseName() + (isGrnToGlb ? ".glb" : ".grn");
+        QString outPath = QDir(outDir).filePath(outFileName);
+
+        ConversionOptions opts;
+        if (isGrnToGlb) {
+            opts.y_up = grnOptions->convertCoordinates();
+            opts.embed_textures = grnOptions->embedTextures();
+            opts.texture_format = grnOptions->looseTextureFormat();
+            opts.vtex_enabled = grnOptions->decompressVTex();
+            opts.scale = grnOptions->scaleMultiplier();
+            if (grnOptions->embedAnimations()) {
+                opts.anim_files = grnOptions->externalAnimFiles();
+            }
+        } else {
+            opts.y_up = glbOptions->convertCoordinates();
+            if (glbOptions->isTargetHeightMode()) {
+                opts.target_height = glbOptions->targetHeight();
+            } else {
+                opts.scale = glbOptions->scaleFactor();
+            }
+            opts.vtex_enabled = glbOptions->compressVTex();
+            opts.split_animations = glbOptions->splitAnimations();
+        }
+
+        progressBar->setValue(0);
+        progressBar->setVisible(true);
+        statusLabel->setText(owner.tr("Converting..."));
+        updateActionState();
+
+        worker->setJob(false, inPath.toStdString(), outPath.toStdString(), opts);
+        worker->start();
+    }
+
+    void onProgress(float p) {
+        progressBar->setValue(static_cast<int>(p * 100.0f));
+    }
+
+    void onLog(const QString& msg, int lvl) {
+        logDrawer->appendLog(msg, lvl);
+    }
+
+    void onFinished(bool ok, const QString& summary) {
+        updateActionState();
+        statusLabel->setText(summary);
+        progressBar->setValue(ok ? 100 : 0);
+        progressBar->setVisible(false);
+    }
+};
+
+MainWindow::MainWindow(oclero::qlementine::ThemeManager* themeManager, QWidget* parent)
+    : QWidget(parent)
+    , _impl(std::make_unique<Impl>(*this, themeManager)) {
+    setWindowTitle(tr("GRN <-> GLB Converter"));
+    setFixedWidth(400);
+    setMinimumHeight(600);
+    resize(400, 800);
+    setAcceptDrops(true);
+    _impl->setupUI();
+}
+
+MainWindow::~MainWindow() = default;
+
+void MainWindow::openPath(const QString& path) {
+    _impl->inputEdit->setText(path);
+}
+
+void MainWindow::executeConversion() {
+    _impl->executeConversion();
+}
+
+bool MainWindow::isConverting() const {
+    return _impl->worker && _impl->worker->isRunning();
+}
+
+void MainWindow::setSplitAnims(bool enabled) {
+    _impl->glbOptions->setSplitAnimations(enabled);
+}
+
+void MainWindow::setEmbedAnims(bool enabled) {
+    _impl->grnOptions->setEmbedAnimations(enabled);
+}
+
+void MainWindow::setEmbedTextures(bool enabled) {
+    _impl->grnOptions->setEmbedTextures(enabled);
+}
+
+void MainWindow::setActiveTab(int index) {
+    _impl->navBar->setCurrentIndex(index);
+}
+
+void MainWindow::dragEnterEvent(QDragEnterEvent* event) {
+    if (event->mimeData()->hasUrls()) {
+        event->acceptProposedAction();
+    }
+}
+
+void MainWindow::dragMoveEvent(QDragMoveEvent* event) {
+    if (event->mimeData()->hasUrls()) {
+        event->acceptProposedAction();
+    }
+}
+
+void MainWindow::dropEvent(QDropEvent* event) {
+    const auto urls = event->mimeData()->urls();
+    if (!urls.isEmpty()) {
+        QString localPath = urls.first().toLocalFile();
+        if (!localPath.isEmpty()) {
+            openPath(localPath);
+            event->acceptProposedAction();
+        }
+    }
+}
+
+} // namespace grn

@@ -1,0 +1,7 @@
+<!DOCTYPE RCC>
+<RCC version="1.0">
+    <qresource prefix="/themes">
+        <file alias="dark.json">themes/dark.json</file>
+        <file alias="light.json">themes/light.json</file>
+    </qresource>
+</RCC>

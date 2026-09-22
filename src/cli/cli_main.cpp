@@ -29,7 +29,7 @@ static void print_help() {
               << "  --target-height <val>    Target height in game units (e.g. 107 for post, 73 for human)\n"
               << "  --meters                 Standard glTF metric conversion (scale = 39.37 inches/meter)\n"
               << "  --z-up                   Preserve native Z-up coordinates (default converts to Y-up)\n"
-              << "  --gui                    Force launching the Dear ImGui GUI window\n"
+              << "  --gui                    Force launching the graphical user interface (GUI)\n"
               << "  -h, --help               Display this help message and exit\n";
 }
 
