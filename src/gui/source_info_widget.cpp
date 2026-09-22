@@ -113,42 +113,24 @@ void SourceInfoWidget::setSourceModel(const GrnModel* model, const QString& inpu
     if (model) {
         size_t totalVerts = 0;
         size_t totalTris = 0;
-        bool exceeds16Bit = false;
+        size_t maxMeshVerts = 0;
 
         for (const auto& m : model->meshes) {
             totalVerts += m.vertices.size();
             totalTris += m.faces.size();
-            if (m.vertices.size() > 64000) {
-                exceeds16Bit = true;
-            }
-        }
-        if (totalVerts > 65000 && !isGrn) {
-            exceeds16Bit = true;
+            maxMeshVerts = std::max(maxMeshVerts, m.vertices.size());
         }
 
-        _impl->is16BitExceeded = exceeds16Bit;
         _impl->geomLabel->setText(QString("%1 meshes, %2 verts, %3 tris")
             .arg(model->meshes.size())
             .arg(totalVerts)
             .arg(totalTris));
         _impl->rigLabel->setText(QString("%1 bones").arg(model->bones.size()));
 
-        if (exceeds16Bit) {
-            _impl->limitLabel->setText(tr("⚠️ >65k Verts (Auto-Split Active)"));
-            _impl->limitLabel->setStyleSheet("color: #d88000; font-weight: bold;");
-            _impl->statusBadge->setText(tr("⚠️ >65k Verts"));
-            _impl->statusBadge->setStyleSheet(
-                "QLabel {"
-                "  background: rgba(255, 140, 0, 0.18);"
-                "  color: #d88000;"
-                "  border-radius: 4px;"
-                "  padding: 2px 6px;"
-                "  font-size: 11px;"
-                "  font-weight: bold;"
-                "}"
-            );
-        } else {
-            _impl->limitLabel->setText(tr("✓ 16-bit Safe (<65k)"));
+        if (isGrn) {
+            // GRN source converting to GLB: GLB has full 32-bit indexing support
+            _impl->is16BitExceeded = false;
+            _impl->limitLabel->setText(tr("✓ 16-bit Safe (GRN Native)"));
             _impl->limitLabel->setStyleSheet("color: #28a745;");
             _impl->statusBadge->setText(tr("Loaded ✓"));
             _impl->statusBadge->setStyleSheet(
@@ -161,9 +143,43 @@ void SourceInfoWidget::setSourceModel(const GrnModel* model, const QString& inpu
                 "  font-weight: bold;"
                 "}"
             );
-        }
+            emit limitDetected(false);
+        } else {
+            // GLB source converting to GRN: Granny 1.2b has a strict 16-bit vertex index limit (<= 65,535)
+            bool exceeds16Bit = (maxMeshVerts > 64000);
+            _impl->is16BitExceeded = exceeds16Bit;
 
-        emit limitDetected(exceeds16Bit);
+            if (exceeds16Bit) {
+                _impl->limitLabel->setText(tr("⚠️ >65k Verts (%1 max) → Optimizer ON").arg(maxMeshVerts));
+                _impl->limitLabel->setStyleSheet("color: #d88000; font-weight: bold;");
+                _impl->statusBadge->setText(tr("⚠️ >65k Verts"));
+                _impl->statusBadge->setStyleSheet(
+                    "QLabel {"
+                    "  background: rgba(255, 140, 0, 0.18);"
+                    "  color: #d88000;"
+                    "  border-radius: 4px;"
+                    "  padding: 2px 6px;"
+                    "  font-size: 11px;"
+                    "  font-weight: bold;"
+                    "}"
+                );
+            } else {
+                _impl->limitLabel->setText(tr("✓ 16-bit Safe (max %1 verts)").arg(maxMeshVerts));
+                _impl->limitLabel->setStyleSheet("color: #28a745;");
+                _impl->statusBadge->setText(tr("Loaded ✓"));
+                _impl->statusBadge->setStyleSheet(
+                    "QLabel {"
+                    "  background: rgba(40, 167, 69, 0.15);"
+                    "  color: #28a745;"
+                    "  border-radius: 4px;"
+                    "  padding: 2px 6px;"
+                    "  font-size: 11px;"
+                    "  font-weight: bold;"
+                    "}"
+                );
+            }
+            emit limitDetected(exceeds16Bit);
+        }
     } else {
         clearSource();
     }

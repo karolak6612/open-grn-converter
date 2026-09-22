@@ -535,14 +535,20 @@ struct MainWindow::Impl {
         if (loadedModel) {
             QFileInfo fi(path);
             modelViewer->loadSourceModel(&*loadedModel, fi.fileName());
+            bool isGrn = (navBar->currentIndex() == 0);
             if (sourceInfoWidget) {
-                bool isGrn = (navBar->currentIndex() == 0);
                 sourceInfoWidget->setSourceModel(&*loadedModel, path, isGrn);
+            }
+            if (glbOptions) {
+                glbOptions->setModelAnalysis(isGrn ? nullptr : &*loadedModel);
             }
         } else {
             modelViewer->loadSourceModel(nullptr, QString());
             if (sourceInfoWidget) {
                 sourceInfoWidget->clearSource();
+            }
+            if (glbOptions) {
+                glbOptions->setModelAnalysis(nullptr);
             }
         }
         updateViewerScale();

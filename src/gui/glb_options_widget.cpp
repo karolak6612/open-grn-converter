@@ -34,6 +34,10 @@ struct GlbOptionsWidget::Impl {
     oclero::qlementine::Switch* vtexCompressSwitch{ nullptr };
     oclero::qlementine::Switch* splitAnimsSwitch{ nullptr };
     oclero::qlementine::Switch* autoSplit16BitSwitch{ nullptr };
+    QLabel* optimizerStatusLabel{ nullptr };
+    size_t lastAnalyzedMaxVerts{ 0 };
+    bool lastAnalyzedExceeded{ false };
+    bool userManuallyToggled{ false };
 
     QWidget* animSectionWidget{ nullptr };
     QLabel* animLabel{ nullptr };
@@ -126,13 +130,26 @@ struct GlbOptionsWidget::Impl {
         });
         optLayout->addRow(owner.tr("Split Animations:"), splitAnimsSwitch);
 
+        auto* optRow = new QHBoxLayout();
+        optRow->setContentsMargins(0, 0, 0, 0);
+        optRow->setSpacing(6);
+
         autoSplit16BitSwitch = new oclero::qlementine::Switch(optCard);
-        autoSplit16BitSwitch->setChecked(true);
-        autoSplit16BitSwitch->setToolTip(owner.tr("Automatically partition high-poly meshes (>64,000 vertices) to prevent Granny 1.2b 16-bit vertex overflow crashes"));
+        autoSplit16BitSwitch->setChecked(false);
+        autoSplit16BitSwitch->setToolTip(owner.tr("Automatically partition high-poly meshes (>64,000 vertices) into 16-bit safe sub-meshes to prevent Granny 1.2b / Sacred Gold crashes. Auto-detected on model load."));
+        optRow->addWidget(autoSplit16BitSwitch);
+
+        optimizerStatusLabel = new QLabel(owner.tr("(Auto-detected on load)"), optCard);
+        optimizerStatusLabel->setStyleSheet("font-size: 11px; color: #888888;");
+        optRow->addWidget(optimizerStatusLabel);
+        optRow->addStretch(1);
+
         QObject::connect(autoSplit16BitSwitch, &oclero::qlementine::Switch::clicked, &owner, [this]() {
+            userManuallyToggled = true;
+            updateOptimizerStatusText();
             emit owner.optionsChanged();
         });
-        optLayout->addRow(owner.tr("Auto-Split >65k Verts:"), autoSplit16BitSwitch);
+        optLayout->addRow(owner.tr("Mesh Optimizer (16-bit):"), optRow);
 
         layout->addWidget(optCard);
 
@@ -237,6 +254,58 @@ struct GlbOptionsWidget::Impl {
         }
     }
 
+    void updateOptimizerStatusText() {
+        if (!optimizerStatusLabel) return;
+        bool enabled = autoSplit16BitSwitch->isChecked();
+
+        if (userManuallyToggled) {
+            if (lastAnalyzedExceeded && !enabled) {
+                optimizerStatusLabel->setText(owner.tr("Manual: OFF ⚠️ (May crash Sacred!)"));
+                optimizerStatusLabel->setStyleSheet("font-size: 11px; color: #d88000; font-weight: bold;");
+            } else if (enabled) {
+                optimizerStatusLabel->setText(owner.tr("Manual: ON (Safety active)"));
+                optimizerStatusLabel->setStyleSheet("font-size: 11px; color: #0078d7; font-weight: bold;");
+            } else {
+                optimizerStatusLabel->setText(owner.tr("Manual: OFF"));
+                optimizerStatusLabel->setStyleSheet("font-size: 11px; color: #888888;");
+            }
+        } else {
+            if (lastAnalyzedExceeded) {
+                optimizerStatusLabel->setText(owner.tr("Auto: ON (>65k detected)"));
+                optimizerStatusLabel->setStyleSheet("font-size: 11px; color: #d88000; font-weight: bold;");
+            } else if (lastAnalyzedMaxVerts > 0) {
+                optimizerStatusLabel->setText(owner.tr("Auto: OFF (Safe <65k)"));
+                optimizerStatusLabel->setStyleSheet("font-size: 11px; color: #28a745;");
+            } else {
+                optimizerStatusLabel->setText(owner.tr("(Auto-detected on load)"));
+                optimizerStatusLabel->setStyleSheet("font-size: 11px; color: #888888;");
+            }
+        }
+    }
+
+    void setModelAnalysis(const GrnModel* model) {
+        userManuallyToggled = false;
+        if (!model || model->meshes.empty()) {
+            lastAnalyzedMaxVerts = 0;
+            lastAnalyzedExceeded = false;
+            autoSplit16BitSwitch->setChecked(false);
+            updateOptimizerStatusText();
+            return;
+        }
+
+        size_t maxVerts = 0;
+        for (const auto& m : model->meshes) {
+            maxVerts = std::max(maxVerts, m.vertices.size());
+        }
+
+        lastAnalyzedMaxVerts = maxVerts;
+        lastAnalyzedExceeded = (maxVerts > 64000);
+
+        // Auto-detect: turn ON if > 64000, turn OFF if <= 64000
+        autoSplit16BitSwitch->setChecked(lastAnalyzedExceeded);
+        updateOptimizerStatusText();
+    }
+
     void reset() {
         coordSwitch->setChecked(true);
         scaleModeCombo->setCurrentIndex(0);
@@ -246,7 +315,11 @@ struct GlbOptionsWidget::Impl {
         targetHeightSpin->setEnabled(false);
         vtexCompressSwitch->setChecked(true);
         splitAnimsSwitch->setChecked(true);
-        autoSplit16BitSwitch->setChecked(true);
+        autoSplit16BitSwitch->setChecked(false);
+        userManuallyToggled = false;
+        lastAnalyzedMaxVerts = 0;
+        lastAnalyzedExceeded = false;
+        updateOptimizerStatusText();
         animSectionWidget->setVisible(true);
         bottomStretch->setVisible(false);
         rebuildTree();
@@ -290,7 +363,22 @@ bool GlbOptionsWidget::splitAnimations() const {
 }
 
 bool GlbOptionsWidget::autoSplit16Bit() const {
+    return isMeshOptimizerEnabled();
+}
+
+bool GlbOptionsWidget::isMeshOptimizerEnabled() const {
     return _impl->autoSplit16BitSwitch->isChecked();
+}
+
+void GlbOptionsWidget::setMeshOptimizerEnabled(bool enabled) {
+    _impl->userManuallyToggled = true;
+    _impl->autoSplit16BitSwitch->setChecked(enabled);
+    _impl->updateOptimizerStatusText();
+    emit optionsChanged();
+}
+
+void GlbOptionsWidget::setModelAnalysis(const GrnModel* model) {
+    _impl->setModelAnalysis(model);
 }
 
 void GlbOptionsWidget::setSplitAnimations(bool split) {

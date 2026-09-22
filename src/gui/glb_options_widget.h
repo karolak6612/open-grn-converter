@@ -21,8 +21,11 @@ public:
     bool compressVTex() const;
     bool splitAnimations() const;
     bool autoSplit16Bit() const;
+    bool isMeshOptimizerEnabled() const;
 
     void setSplitAnimations(bool split);
+    void setMeshOptimizerEnabled(bool enabled);
+    void setModelAnalysis(const struct GrnModel* model);
     void reset();
 
 signals:

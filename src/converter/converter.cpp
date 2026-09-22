@@ -275,6 +275,14 @@ bool convert_file(const std::filesystem::path& input,
             callback(input.filename().string(), 0.5f, true,
                 "Auto-partitioned high-poly mesh into " + std::to_string(model->meshes.size()) +
                 " 16-bit safe sub-meshes (≤" + std::to_string(options.max_vertices_16bit) + " vertices/mesh)");
+        } else if (!options.auto_split_16bit && callback) {
+            for (const auto& m : model->meshes) {
+                if (m.vertices.size() > 65535) {
+                    callback(input.filename().string(), 0.5f, false,
+                        "WARNING: Mesh '" + m.name + "' has " + std::to_string(m.vertices.size()) +
+                        " vertices (>65,535). Mesh optimizer is OFF: this file will crash Granny 1.2b / Sacred Gold!");
+                }
+            }
         }
 
         bool split_anims = options.split_animations && !model->animations.empty();

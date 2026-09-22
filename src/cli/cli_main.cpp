@@ -24,6 +24,8 @@ static void print_help() {
               << "  --anim <path>            External animation .grn track to merge into output model (can repeat)\n"
               << "  --split-anims            Split GLB animations into separate .grn files (default)\n"
               << "  --no-split-anims         Keep all GLB animations embedded into a single .grn file\n"
+              << "  --optimizer              Enable 16-bit vertex partitioner when converting GLB to GRN (default)\n"
+              << "  --no-optimizer           Disable 16-bit vertex partitioner (can cause in-game crash if >65k verts)\n"
               << "  --tint-pink              Test feature: apply pink tint filter to textures\n"
               << "  --scale <val>            Global scale factor applied to geometry/bones\n"
               << "  --target-height <val>    Target height in game units (e.g. 107 for post, 73 for human)\n"
@@ -67,6 +69,10 @@ int run_cli(int argc, char* argv[]) {
             options.split_animations = true;
         } else if (arg == "--no-split-anims") {
             options.split_animations = false;
+        } else if (arg == "--no-optimizer" || arg == "--no-split-16bit") {
+            options.auto_split_16bit = false;
+        } else if (arg == "--optimizer" || arg == "--split-16bit") {
+            options.auto_split_16bit = true;
         } else if (arg == "--tint-pink") {
             options.tint_pink = true;
         } else if (arg == "--scale" && i + 1 < argc) {
