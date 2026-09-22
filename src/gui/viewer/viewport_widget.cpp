@@ -250,16 +250,31 @@ void ViewportWidget::setShowGrid(bool enabled) {
     update();
 }
 
+void ViewportWidget::setModelScale(float s) {
+    skinning_.setScale(s);
+    update();
+}
+
+void ViewportWidget::syncCamera(const OrbitCamera& cam) {
+    camera_.target = cam.target;
+    camera_.yaw = cam.yaw;
+    camera_.pitch = cam.pitch;
+    camera_.distance = cam.distance;
+    update();
+}
+
 void ViewportWidget::frameBounds() {
     QVector3D minXYZ, maxXYZ;
     skinning_.computeBounds(minXYZ, maxXYZ);
     camera_.frameBounds(minXYZ, maxXYZ);
+    emit cameraChanged(camera_);
     update();
 }
 
 void ViewportWidget::resetCamera() {
     camera_.reset();
     frameBounds();
+    emit cameraChanged(camera_);
     update();
 }
 
@@ -380,9 +395,11 @@ void ViewportWidget::mouseMoveEvent(QMouseEvent* event) {
 
     if (is_orbiting_) {
         camera_.orbit(dx, dy);
+        emit cameraChanged(camera_);
         update();
     } else if (is_panning_) {
         camera_.pan(dx, dy);
+        emit cameraChanged(camera_);
         update();
     }
 }
@@ -400,6 +417,7 @@ void ViewportWidget::wheelEvent(QWheelEvent* event) {
     if (delta != 0.0f) {
         float factor = (delta > 0.0f) ? 0.88f : 1.14f;
         camera_.zoom(factor);
+        emit cameraChanged(camera_);
         update();
     }
 }

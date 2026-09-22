@@ -39,6 +39,14 @@ public:
     void setShowGrid(bool enabled);
     void frameBounds();
     void resetCamera();
+    void setModelScale(float s);
+    float modelScale() const { return skinning_.scale(); }
+
+    const OrbitCamera& camera() const { return camera_; }
+    void syncCamera(const OrbitCamera& cam);
+
+    void setViewportLabel(const QString& label) { viewport_label_ = label; }
+    QString viewportLabel() const { return viewport_label_; }
 
     bool isPlaying() const { return is_playing_; }
     bool isLooping() const { return is_looping_; }
@@ -47,6 +55,7 @@ public:
     bool hasAnimation() const { return skinning_.hasAnimation(); }
 
 signals:
+    void cameraChanged(const OrbitCamera& cam);
     void playbackTimeChanged(float curTime, float duration);
     void playbackStateChanged(bool playing);
     void modelLoaded(size_t meshCount, size_t vertCount, size_t boneCount);
@@ -93,6 +102,7 @@ private:
     QPoint last_mouse_pos_;
     bool is_orbiting_{ false };
     bool is_panning_{ false };
+    QString viewport_label_;
 
     void setupGridGeometry();
     void renderGrid(const QMatrix4x4& viewProj);

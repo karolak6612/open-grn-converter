@@ -280,12 +280,50 @@ static void test_viewer_real_assets() {
     std::cout << "  -> Viewer real assets passed" << std::endl;
 }
 
+static void test_skinning_engine_scale() {
+    std::cout << "[TEST] SkinningEngine dynamic scale ..." << std::endl;
+
+    grn::GrnModel model;
+    grn::GrnMesh mesh;
+    mesh.name = "box";
+    mesh.vertices = { { -1.0f, -2.0f, -3.0f }, { 1.0f, 2.0f, 3.0f } };
+    mesh.faces = { { 0, 1, 0 } };
+    model.meshes.push_back(mesh);
+
+    grn::SkinningEngine engine;
+    engine.setModel(&model);
+
+    // Default scale 1.0
+    engine.evaluate(0.0f);
+    QVector3D minB, maxB;
+    engine.computeBounds(minB, maxB);
+    assert(std::abs(minB.x() - (-1.0f)) < 1e-4f);
+    assert(std::abs(maxB.z() - 3.0f) < 1e-4f);
+
+    // Scale 2.5x
+    engine.setScale(2.5f);
+    assert(std::abs(engine.scale() - 2.5f) < 1e-5f);
+    engine.evaluate(0.0f);
+    engine.computeBounds(minB, maxB);
+    assert(std::abs(minB.x() - (-2.5f)) < 1e-4f);
+    assert(std::abs(maxB.z() - 7.5f) < 1e-4f);
+
+    // Verify positions
+    const auto& pos = engine.skinnedPositions();
+    assert(std::abs(pos[0][0].x() - (-2.5f)) < 1e-4f);
+    assert(std::abs(pos[0][1].z() - 7.5f) < 1e-4f);
+    (void)pos;
+
+    std::cout << "  -> SkinningEngine scale passed" << std::endl;
+}
+
 int main() {
     try {
         test_orbit_camera();
         test_grn_anim_sampler_synthetic();
         test_skinning_engine_synthetic();
         test_viewer_real_assets();
+        test_skinning_engine_scale();
         std::cout << "\nALL VIEWER ENGINE TESTS PASSED!" << std::endl;
         return 0;
     } catch (const std::exception& ex) {

@@ -117,6 +117,7 @@ set(GRN_APP_SOURCES
     src/gui/viewer/playback_bar.cpp
     src/gui/viewer/viewport_widget.cpp
     src/gui/viewer/model_viewer_panel.cpp
+    src/gui/target_info_widget.cpp
 )
 
 set(GRN_APP_HEADERS
@@ -128,6 +129,7 @@ set(GRN_APP_HEADERS
     src/gui/log_drawer.h
     src/gui/section_card.h
     src/gui/gui_utils.h
+    src/gui/target_info_widget.h
     src/gui/viewer/camera.h
     src/gui/viewer/grn_anim_sampler.h
     src/gui/viewer/skinning_engine.h

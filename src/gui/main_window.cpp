@@ -5,6 +5,7 @@
 #include "log_drawer.h"
 #include "section_card.h"
 #include "gui_utils.h"
+#include "target_info_widget.h"
 #include "viewer/model_viewer_panel.h"
 #include "viewer/viewport_widget.h"
 #include "../core/grn_parser.h"
@@ -43,6 +44,7 @@
 #include <QFrame>
 #include <QDialog>
 #include <QAction>
+#include <QSplitter>
 
 namespace grn {
 
@@ -54,15 +56,24 @@ struct MainWindow::Impl {
     ConversionWorker* worker{ nullptr };
 
     // Layout & 3D Viewer
+    QSplitter* mainSplitter{ nullptr };
     QWidget* converterPanel{ nullptr };
     ModelViewerPanel* modelViewer{ nullptr };
+    TargetInfoWidget* targetInfoWidget{ nullptr };
     QAction* previewAction{ nullptr };
     QToolButton* previewToggleBtn{ nullptr };
     QPointer<QDialog> detachedDialog;
     std::optional<GrnModel> loadedModel;
+    std::optional<GrnModel> convertedModel;
     std::optional<GrnModel> cachedExternalAnimModel;
-    bool isPreviewVisible{ false };
-    QHBoxLayout* splitLayout{ nullptr };
+    QString lastOutputPath;
+    bool isPreviewVisible{ true };
+
+    int previousTabIndex{ 0 };
+    QString cachedGrnInputPath;
+    QString cachedGrnOutputPath;
+    QString cachedGlbInputPath;
+    QString cachedGlbOutputPath;
 
     QVBoxLayout* rootLayout{ nullptr };
     QMenuBar* menuBar{ nullptr };
@@ -72,7 +83,7 @@ struct MainWindow::Impl {
     QProgressBar* progressBar{ nullptr };
     QToolButton* logDrawerBtn{ nullptr };
 
-    // Top Navigation Tabs (Qlementine NavigationBar with underline indicator)
+    // Top Navigation Tabs
     oclero::qlementine::NavigationBar* navBar{ nullptr };
 
     // Source & Destination
@@ -89,6 +100,7 @@ struct MainWindow::Impl {
 
     // Bottom Tray: Log Drawer
     LogDrawer* logDrawer{ nullptr };
+    QWidget* fileBoxWidget{ nullptr };
 
     Impl(MainWindow& o, oclero::qlementine::ThemeManager* tm)
         : owner(o)
@@ -148,7 +160,7 @@ struct MainWindow::Impl {
             togglePreview(!isPreviewVisible);
         });
         previewAction->setCheckable(true);
-        previewAction->setChecked(false);
+        previewAction->setChecked(true);
 
         auto* helpMenu = menuBar->addMenu(owner.tr("&Help"));
         helpMenu->addAction(makeThemedIcon(Icons16::Misc_Help), owner.tr("&About GRN Converter..."), [this]() {
@@ -170,14 +182,52 @@ struct MainWindow::Impl {
         navBar->setCurrentIndex(0);
 
         QObject::connect(navBar, &oclero::qlementine::NavigationBar::currentIndexChanged, &owner, [this]() {
-            int idx = navBar->currentIndex();
-            optionsStack->setCurrentIndex(idx);
-            updateActionState();
-            updateModelInOptions();
+            onTabChanged(navBar->currentIndex());
         });
     }
 
-    QWidget* fileBoxWidget{ nullptr };
+    void onTabChanged(int newIdx) {
+        if (newIdx == previousTabIndex) return;
+
+        // 1. Cache current paths for previous tab
+        if (previousTabIndex == 0) {
+            cachedGrnInputPath = inputEdit->text();
+            cachedGrnOutputPath = outputEdit->text();
+        } else {
+            cachedGlbInputPath = inputEdit->text();
+            cachedGlbOutputPath = outputEdit->text();
+        }
+        previousTabIndex = newIdx;
+
+        optionsStack->setCurrentIndex(newIdx);
+
+        // 2. Restore cached paths for new tab
+        inputEdit->blockSignals(true);
+        outputEdit->blockSignals(true);
+        if (newIdx == 0) {
+            inputEdit->setText(cachedGrnInputPath);
+            outputEdit->setText(cachedGrnOutputPath);
+        } else {
+            inputEdit->setText(cachedGlbInputPath);
+            outputEdit->setText(cachedGlbOutputPath);
+        }
+        inputEdit->blockSignals(false);
+        outputEdit->blockSignals(false);
+
+        // 3. Clear target model / preview / target info widget
+        convertedModel.reset();
+        lastOutputPath.clear();
+        if (targetInfoWidget) {
+            targetInfoWidget->clearTarget();
+        }
+        if (modelViewer) {
+            modelViewer->loadTargetModel(nullptr, QString());
+        }
+
+        // 4. Update source model & preview for new tab
+        updateActionState();
+        updateModelInOptions();
+    }
 
     void setupSourceAndDestination() {
         auto* srcDestContainer = new QWidget(&owner);
@@ -243,6 +293,9 @@ struct MainWindow::Impl {
         optionsStack = new QStackedWidget(&owner);
 
         grnOptions = new GrnOptionsWidget(optionsStack);
+        QObject::connect(grnOptions, &GrnOptionsWidget::optionsChanged, &owner, [this]() {
+            updateViewerScale();
+        });
         QObject::connect(grnOptions, &GrnOptionsWidget::animFilesChanged, &owner, [this]() {
             updateBadges();
         });
@@ -252,6 +305,9 @@ struct MainWindow::Impl {
         optionsStack->addWidget(grnOptions);
 
         glbOptions = new GlbOptionsWidget(optionsStack);
+        QObject::connect(glbOptions, &GlbOptionsWidget::optionsChanged, &owner, [this]() {
+            updateViewerScale();
+        });
         QObject::connect(glbOptions, &GlbOptionsWidget::animationSelected, &owner, [this](int animIndex) {
             onGlbAnimationSelected(animIndex);
         });
@@ -304,7 +360,7 @@ struct MainWindow::Impl {
         previewToggleBtn->setText(owner.tr("3D Preview"));
         previewToggleBtn->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
         previewToggleBtn->setCheckable(true);
-        previewToggleBtn->setChecked(false);
+        previewToggleBtn->setChecked(true);
         QObject::connect(previewToggleBtn, &QToolButton::toggled, &owner, [this](bool chk) {
             togglePreview(chk);
         });
@@ -324,10 +380,11 @@ struct MainWindow::Impl {
 
     void setupLayout() {
         converterPanel = new QWidget(&owner);
-        converterPanel->setFixedWidth(400);
+        converterPanel->setMinimumWidth(320);
+        converterPanel->setMaximumWidth(420);
 
         auto* convLayout = new QVBoxLayout(converterPanel);
-        convLayout->setContentsMargins(8, 0, 8, 0);
+        convLayout->setContentsMargins(8, 4, 8, 4);
         convLayout->setSpacing(6);
         convLayout->addWidget(navBar);
         convLayout->addWidget(oclero::qlementine::makeHorizontalLine(&owner));
@@ -338,7 +395,8 @@ struct MainWindow::Impl {
         convLayout->addWidget(statusBar);
 
         modelViewer = new ModelViewerPanel(&owner);
-        modelViewer->setVisible(false);
+        modelViewer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+        modelViewer->setMinimumWidth(360);
         QObject::connect(modelViewer, &ModelViewerPanel::closeRequested, &owner, [this]() {
             togglePreview(false);
         });
@@ -346,18 +404,31 @@ struct MainWindow::Impl {
             detachPreview();
         });
 
+        targetInfoWidget = new TargetInfoWidget(&owner);
+        targetInfoWidget->setMinimumWidth(240);
+        targetInfoWidget->setMaximumWidth(360);
+        QObject::connect(targetInfoWidget, &TargetInfoWidget::animationSelected, &owner, [this](int animIndex, const QString& clipPath) {
+            onTargetAnimationSelected(animIndex, clipPath);
+        });
+
+        mainSplitter = new QSplitter(Qt::Horizontal, &owner);
+        mainSplitter->setHandleWidth(4);
+        mainSplitter->addWidget(converterPanel);
+        mainSplitter->addWidget(modelViewer);
+        mainSplitter->addWidget(targetInfoWidget);
+        mainSplitter->setCollapsible(0, false);
+        mainSplitter->setCollapsible(1, false);
+        mainSplitter->setCollapsible(2, true);
+        mainSplitter->setStretchFactor(0, 0);
+        mainSplitter->setStretchFactor(1, 1);
+        mainSplitter->setStretchFactor(2, 0);
+        mainSplitter->setSizes({ 360, 600, 320 });
+
         auto* outerLayout = new QVBoxLayout(&owner);
         outerLayout->setContentsMargins(0, 0, 0, 0);
         outerLayout->setSpacing(0);
         outerLayout->setMenuBar(menuBar);
-
-        splitLayout = new QHBoxLayout();
-        splitLayout->setContentsMargins(0, 0, 0, 0);
-        splitLayout->setSpacing(0);
-        splitLayout->addWidget(converterPanel);
-        splitLayout->addWidget(modelViewer, 1);
-
-        outerLayout->addLayout(splitLayout, 1);
+        outerLayout->addWidget(mainSplitter, 1);
     }
 
     void onInputPathChanged() {
@@ -370,18 +441,29 @@ struct MainWindow::Impl {
                 }
 
                 QString ext = fi.suffix().toLower();
-                if (ext == "grn") {
+                if (ext == "grn" && navBar->currentIndex() != 0) {
+                    cachedGrnInputPath = path;
+                    previousTabIndex = 0;
                     navBar->blockSignals(true);
-                    navBar->setCurrentIndex(0); // Switch to GRN -> GLB
+                    navBar->setCurrentIndex(0);
                     optionsStack->setCurrentIndex(0);
                     navBar->blockSignals(false);
-                } else if (ext == "glb" || ext == "gltf") {
+                } else if ((ext == "glb" || ext == "gltf") && navBar->currentIndex() != 1) {
+                    cachedGlbInputPath = path;
+                    previousTabIndex = 1;
                     navBar->blockSignals(true);
-                    navBar->setCurrentIndex(1); // Switch to GLB -> GRN
+                    navBar->setCurrentIndex(1);
                     optionsStack->setCurrentIndex(1);
                     navBar->blockSignals(false);
                 }
             }
+        }
+        if (navBar->currentIndex() == 0) {
+            cachedGrnInputPath = path;
+            cachedGrnOutputPath = outputEdit->text();
+        } else {
+            cachedGlbInputPath = path;
+            cachedGlbOutputPath = outputEdit->text();
         }
         updateActionState();
         updateModelInOptions();
@@ -395,6 +477,13 @@ struct MainWindow::Impl {
 
         loadedModel.reset();
         cachedExternalAnimModel.reset();
+        convertedModel.reset();
+        if (targetInfoWidget) {
+            targetInfoWidget->clearTarget();
+        }
+        if (modelViewer) {
+            modelViewer->loadTargetModel(nullptr, QString());
+        }
 
         if (!path.isEmpty()) {
             QFileInfo fi(path);
@@ -411,13 +500,41 @@ struct MainWindow::Impl {
             }
         }
 
-        if (isPreviewVisible) {
-            if (loadedModel) {
-                QFileInfo fi(path);
-                modelViewer->loadModel(&*loadedModel, fi.fileName());
+        if (loadedModel) {
+            QFileInfo fi(path);
+            modelViewer->loadSourceModel(&*loadedModel, fi.fileName());
+        } else {
+            modelViewer->loadSourceModel(nullptr, QString());
+        }
+        updateViewerScale();
+    }
+
+    void updateViewerScale() {
+        float s = 1.0f;
+        if (navBar->currentIndex() == 0) {
+            s = grnOptions->scaleMultiplier();
+        } else {
+            if (glbOptions->isTargetHeightMode()) {
+                float th = glbOptions->targetHeight();
+                if (th > 0.0f && loadedModel) {
+                    float min_z = 1e30f, max_z = -1e30f;
+                    for (const auto& m : loadedModel->meshes) {
+                        for (const auto& v : m.vertices) {
+                            min_z = std::min(min_z, v.z);
+                            max_z = std::max(max_z, v.z);
+                        }
+                    }
+                    float h = max_z - min_z;
+                    if (h > 1e-4f) {
+                        s = th / h;
+                    }
+                }
             } else {
-                modelViewer->loadModel(nullptr, QString());
+                s = glbOptions->scaleFactor();
             }
+        }
+        if (modelViewer) {
+            modelViewer->setModelScale(s);
         }
     }
 
@@ -433,20 +550,26 @@ struct MainWindow::Impl {
         }
 
         if (show) {
-            owner.setMinimumWidth(800);
+            owner.setMinimumSize(1000, 600);
             owner.setMaximumWidth(QWIDGETSIZE_MAX);
-            if (modelViewer->parent() != &owner) {
-                splitLayout->addWidget(modelViewer, 1);
-            }
+            converterPanel->setMaximumWidth(420);
             modelViewer->setVisible(true);
-            owner.resize(1040, owner.height());
+            targetInfoWidget->setVisible(true);
+            mainSplitter->setSizes({ 360, 600, 320 });
+            owner.resize(1280, owner.height());
             if (loadedModel) {
                 QFileInfo fi(inputEdit->text());
-                modelViewer->loadModel(&*loadedModel, fi.fileName());
+                modelViewer->loadSourceModel(&*loadedModel, fi.fileName());
+            }
+            if (convertedModel) {
+                QFileInfo fi(lastOutputPath);
+                modelViewer->loadTargetModel(&*convertedModel, fi.fileName());
             }
         } else {
             modelViewer->setVisible(false);
-            owner.setFixedWidth(400);
+            targetInfoWidget->setVisible(false);
+            converterPanel->setMaximumWidth(QWIDGETSIZE_MAX);
+            owner.setMinimumSize(360, 600);
             owner.resize(400, owner.height());
         }
     }
@@ -455,7 +578,7 @@ struct MainWindow::Impl {
         if (!detachedDialog) {
             detachedDialog = new QDialog(&owner);
             detachedDialog->setWindowTitle(owner.tr("3D Model Preview"));
-            detachedDialog->resize(720, 680);
+            detachedDialog->resize(800, 680);
 
             auto* dlgLayout = new QVBoxLayout(detachedDialog);
             dlgLayout->setContentsMargins(0, 0, 0, 0);
@@ -463,13 +586,10 @@ struct MainWindow::Impl {
             modelViewer->setVisible(true);
 
             QObject::connect(detachedDialog, &QDialog::finished, &owner, [this](int) {
-                splitLayout->addWidget(modelViewer, 1);
-                togglePreview(false);
+                mainSplitter->insertWidget(1, modelViewer);
+                modelViewer->setVisible(isPreviewVisible);
             });
             detachedDialog->show();
-
-            owner.setFixedWidth(400);
-            owner.resize(400, owner.height());
         } else {
             detachedDialog->show();
             detachedDialog->raise();
@@ -479,36 +599,104 @@ struct MainWindow::Impl {
 
     void onGrnAnimationSelected(const QString& animPath, int internalAnimIndex) {
         if (internalAnimIndex >= 0 && loadedModel && static_cast<size_t>(internalAnimIndex) < loadedModel->animations.size()) {
-            togglePreview(true);
             const auto& a = loadedModel->animations[internalAnimIndex];
-            modelViewer->playAnimation(&a, QString::fromStdString(a.name));
+            modelViewer->playSourceAnimation(&a, QString::fromStdString(a.name));
+
+            if (convertedModel) {
+                bool found = false;
+                for (const auto& ta : convertedModel->animations) {
+                    if (ta.name == a.name) {
+                        modelViewer->playTargetAnimation(&ta, QString::fromStdString(ta.name));
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found && static_cast<size_t>(internalAnimIndex) < convertedModel->animations.size()) {
+                    modelViewer->playTargetAnimation(&convertedModel->animations[internalAnimIndex], QString());
+                }
+            }
             return;
         }
 
         if (!animPath.isEmpty()) {
-            togglePreview(true);
             cachedExternalAnimModel = parse_grn_file(std::filesystem::path(animPath.toStdWString()));
             if (cachedExternalAnimModel && !cachedExternalAnimModel->animations.empty()) {
                 const auto& a = cachedExternalAnimModel->animations[0];
-                modelViewer->playAnimation(&a, QFileInfo(animPath).fileName());
+                modelViewer->playSourceAnimation(&a, QFileInfo(animPath).fileName());
+
+                if (convertedModel) {
+                    for (const auto& ta : convertedModel->animations) {
+                        if (ta.name == a.name) {
+                            modelViewer->playTargetAnimation(&ta, QString::fromStdString(ta.name));
+                            break;
+                        }
+                    }
+                }
                 return;
             }
         }
 
-        if (isPreviewVisible) {
-            modelViewer->stopAnimation();
-        }
+        modelViewer->stopAnimation();
     }
 
     void onGlbAnimationSelected(int animIndex) {
         if (animIndex >= 0 && loadedModel && static_cast<size_t>(animIndex) < loadedModel->animations.size()) {
-            togglePreview(true);
             const auto& a = loadedModel->animations[animIndex];
-            modelViewer->playAnimation(&a, QString::fromStdString(a.name));
-        } else {
-            if (isPreviewVisible) {
-                modelViewer->stopAnimation();
+            modelViewer->playSourceAnimation(&a, QString::fromStdString(a.name));
+
+            if (convertedModel) {
+                bool found = false;
+                for (const auto& ta : convertedModel->animations) {
+                    if (ta.name == a.name) {
+                        modelViewer->playTargetAnimation(&ta, QString::fromStdString(ta.name));
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found && static_cast<size_t>(animIndex) < convertedModel->animations.size()) {
+                    modelViewer->playTargetAnimation(&convertedModel->animations[animIndex], QString());
+                }
             }
+        } else {
+            modelViewer->stopAnimation();
+        }
+    }
+
+    void onTargetAnimationSelected(int animIndex, const QString& clipPath) {
+        if (animIndex >= 0 && convertedModel && static_cast<size_t>(animIndex) < convertedModel->animations.size()) {
+            const auto& a = convertedModel->animations[animIndex];
+            modelViewer->playTargetAnimation(&a, QString::fromStdString(a.name));
+
+            if (loadedModel) {
+                bool found = false;
+                for (const auto& sa : loadedModel->animations) {
+                    if (sa.name == a.name) {
+                        modelViewer->playSourceAnimation(&sa, QString::fromStdString(sa.name));
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found && static_cast<size_t>(animIndex) < loadedModel->animations.size()) {
+                    modelViewer->playSourceAnimation(&loadedModel->animations[animIndex], QString());
+                }
+            }
+        } else if (!clipPath.isEmpty()) {
+            auto clipModel = parse_grn_file(std::filesystem::path(clipPath.toStdWString()));
+            if (clipModel && !clipModel->animations.empty()) {
+                const auto& a = clipModel->animations[0];
+                modelViewer->playTargetAnimation(&a, QFileInfo(clipPath).fileName());
+
+                if (loadedModel) {
+                    for (const auto& sa : loadedModel->animations) {
+                        if (sa.name == a.name) {
+                            modelViewer->playSourceAnimation(&sa, QString::fromStdString(sa.name));
+                            break;
+                        }
+                    }
+                }
+            }
+        } else {
+            modelViewer->stopAnimation();
         }
     }
 
@@ -581,6 +769,11 @@ struct MainWindow::Impl {
         bool isGrnToGlb = (navBar->currentIndex() == 0);
         QString outFileName = fi.completeBaseName() + (isGrnToGlb ? ".glb" : ".grn");
         QString outPath = QDir(outDir).filePath(outFileName);
+        lastOutputPath = outPath;
+
+        if (targetInfoWidget) {
+            targetInfoWidget->setConverting(true);
+        }
 
         ConversionOptions opts;
         if (isGrnToGlb) {
@@ -625,6 +818,30 @@ struct MainWindow::Impl {
         statusLabel->setText(summary);
         progressBar->setValue(ok ? 100 : 0);
         progressBar->setVisible(false);
+
+        if (ok && !lastOutputPath.isEmpty()) {
+            QFileInfo fi(lastOutputPath);
+            if (fi.exists()) {
+                bool isGrnToGlb = (navBar->currentIndex() == 0);
+                if (isGrnToGlb) {
+                    GlbImportOptions imp_opt;
+                    imp_opt.y_up = true;
+                    imp_opt.texture_dir = fi.dir().filesystemAbsolutePath();
+                    convertedModel = load_glb_file(fi.filesystemFilePath(), imp_opt);
+                } else {
+                    convertedModel = parse_grn_file(fi.filesystemFilePath());
+                }
+
+                if (convertedModel) {
+                    modelViewer->loadTargetModel(&*convertedModel, fi.fileName());
+                    targetInfoWidget->setTargetModel(&*convertedModel, lastOutputPath, isGrnToGlb);
+                } else {
+                    targetInfoWidget->setTargetModel(nullptr, lastOutputPath, isGrnToGlb);
+                }
+            }
+        } else if (!ok) {
+            targetInfoWidget->clearTarget();
+        }
     }
 };
 
@@ -632,9 +849,8 @@ MainWindow::MainWindow(oclero::qlementine::ThemeManager* themeManager, QWidget* 
     : QWidget(parent)
     , _impl(std::make_unique<Impl>(*this, themeManager)) {
     setWindowTitle(tr("GRN <-> GLB Converter"));
-    setFixedWidth(400);
-    setMinimumHeight(600);
-    resize(400, 800);
+    setMinimumSize(1000, 600);
+    resize(1280, 800);
     setAcceptDrops(true);
     _impl->setupUI();
 }

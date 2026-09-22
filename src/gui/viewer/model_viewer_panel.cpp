@@ -9,6 +9,7 @@
 #include <QLabel>
 #include <QComboBox>
 #include <QPushButton>
+#include <QSplitter>
 #include <QFrame>
 
 namespace grn {
@@ -18,19 +19,29 @@ using Icons16 = oclero::qlementine::icons::Icons16;
 struct ModelViewerPanel::Impl {
     ModelViewerPanel& owner;
 
-    QLabel* titleLabel{ nullptr };
-    QLabel* statsLabel{ nullptr };
+    QComboBox* layoutCombo{ nullptr };
     QComboBox* shadingCombo{ nullptr };
     QPushButton* wireBtn{ nullptr };
     QPushButton* gridBtn{ nullptr };
     QPushButton* frameBtn{ nullptr };
+    QPushButton* syncCamBtn{ nullptr };
     QPushButton* detachBtn{ nullptr };
     QPushButton* closeBtn{ nullptr };
 
-    ViewportWidget* viewport{ nullptr };
+    QSplitter* splitter{ nullptr };
+    QWidget* sourceContainer{ nullptr };
+    QLabel* sourceBadge{ nullptr };
+    ViewportWidget* sourceViewport{ nullptr };
+
+    QWidget* targetContainer{ nullptr };
+    QLabel* targetBadge{ nullptr };
+    ViewportWidget* targetViewport{ nullptr };
+
     PlaybackBar* playbackBar{ nullptr };
 
-    QString currentModelTitle;
+    QString currentSourceTitle;
+    QString currentTargetTitle;
+    bool isSyncingCam{ false };
 
     explicit Impl(ModelViewerPanel& o) : owner(o) {
         setupUI();
@@ -38,7 +49,7 @@ struct ModelViewerPanel::Impl {
 
     void setupUI() {
         auto* mainLayout = new QVBoxLayout(&owner);
-        mainLayout->setContentsMargins(6, 6, 6, 6);
+        mainLayout->setContentsMargins(4, 4, 4, 4);
         mainLayout->setSpacing(4);
 
         // --- 1. Top Header Toolbar ---
@@ -46,20 +57,27 @@ struct ModelViewerPanel::Impl {
         headerLayout->setContentsMargins(4, 2, 4, 2);
         headerLayout->setSpacing(6);
 
-        titleLabel = new QLabel(owner.tr("3D Preview"), &owner);
+        auto* titleLabel = new QLabel(owner.tr("Comparison 3D Viewport"), &owner);
         QFont hf = titleLabel->font();
         hf.setBold(true);
         titleLabel->setFont(hf);
         headerLayout->addWidget(titleLabel);
 
-        statsLabel = new QLabel(&owner);
-        statsLabel->setStyleSheet("color: #888888;");
-        QFont sf = statsLabel->font();
-        sf.setPointSize(8);
-        statsLabel->setFont(sf);
-        headerLayout->addWidget(statsLabel);
-
         headerLayout->addStretch(1);
+
+        // Layout mode combo
+        layoutCombo = new QComboBox(&owner);
+        layoutCombo->addItems({
+            owner.tr("Side-by-Side"),
+            owner.tr("Stacked (Up/Down)"),
+            owner.tr("Source Only"),
+            owner.tr("Target Only")
+        });
+        layoutCombo->setFixedHeight(24);
+        QObject::connect(layoutCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), &owner, [this](int idx) {
+            updateLayoutMode(static_cast<ComparisonLayout>(idx));
+        });
+        headerLayout->addWidget(layoutCombo);
 
         // Shading dropdown
         shadingCombo = new QComboBox(&owner);
@@ -78,7 +96,8 @@ struct ModelViewerPanel::Impl {
                 case 2: mode = ShadingMode::ClayMatcap; break;
                 case 3: mode = ShadingMode::Normals; break;
             }
-            viewport->setShadingMode(mode);
+            sourceViewport->setShadingMode(mode);
+            targetViewport->setShadingMode(mode);
         });
         headerLayout->addWidget(shadingCombo);
 
@@ -89,7 +108,8 @@ struct ModelViewerPanel::Impl {
         wireBtn->setFixedHeight(24);
         wireBtn->setToolTip(owner.tr("Toggle wireframe overlay"));
         QObject::connect(wireBtn, &QPushButton::toggled, &owner, [this](bool chk) {
-            viewport->setWireframe(chk);
+            sourceViewport->setWireframe(chk);
+            targetViewport->setWireframe(chk);
         });
         headerLayout->addWidget(wireBtn);
 
@@ -100,16 +120,26 @@ struct ModelViewerPanel::Impl {
         gridBtn->setFixedHeight(24);
         gridBtn->setToolTip(owner.tr("Toggle ground plane grid"));
         QObject::connect(gridBtn, &QPushButton::toggled, &owner, [this](bool chk) {
-            viewport->setShowGrid(chk);
+            sourceViewport->setShowGrid(chk);
+            targetViewport->setShowGrid(chk);
         });
         headerLayout->addWidget(gridBtn);
+
+        // Sync camera toggle
+        syncCamBtn = new QPushButton(makeThemedIcon(Icons16::Action_Refresh), owner.tr("Sync Cam"), &owner);
+        syncCamBtn->setCheckable(true);
+        syncCamBtn->setChecked(true);
+        syncCamBtn->setFixedHeight(24);
+        syncCamBtn->setToolTip(owner.tr("Synchronize camera orbit, pan, and zoom between viewports"));
+        headerLayout->addWidget(syncCamBtn);
 
         // Frame Bounds
         frameBtn = new QPushButton(makeThemedIcon(Icons16::Action_Enlarge), owner.tr("Frame"), &owner);
         frameBtn->setFixedHeight(24);
-        frameBtn->setToolTip(owner.tr("Fit model inside camera view"));
+        frameBtn->setToolTip(owner.tr("Fit both models inside camera view"));
         QObject::connect(frameBtn, &QPushButton::clicked, &owner, [this]() {
-            viewport->frameBounds();
+            sourceViewport->frameBounds();
+            targetViewport->frameBounds();
         });
         headerLayout->addWidget(frameBtn);
 
@@ -122,50 +152,159 @@ struct ModelViewerPanel::Impl {
         });
         headerLayout->addWidget(detachBtn);
 
-        // Close
-        closeBtn = new QPushButton(makeThemedIcon(Icons16::Action_Close), QString(), &owner);
-        closeBtn->setFixedSize(24, 24);
-        closeBtn->setToolTip(owner.tr("Close 3D preview"));
-        QObject::connect(closeBtn, &QPushButton::clicked, &owner, [this]() {
-            emit owner.closeRequested();
-        });
-        headerLayout->addWidget(closeBtn);
-
         mainLayout->addLayout(headerLayout);
 
-        // --- 2. Center 3D Viewport ---
-        viewport = new ViewportWidget(&owner);
-        viewport->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-        viewport->setMinimumSize(320, 240);
-        mainLayout->addWidget(viewport, 1);
+        // --- 2. Center Dual Viewport Splitter ---
+        splitter = new QSplitter(Qt::Horizontal, &owner);
+        splitter->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
 
-        // --- 3. Bottom Playback Toolbar ---
+        // 2A. Source Container
+        sourceContainer = new QWidget(splitter);
+        auto* srcLayout = new QVBoxLayout(sourceContainer);
+        srcLayout->setContentsMargins(0, 0, 0, 0);
+        srcLayout->setSpacing(2);
+
+        sourceBadge = new QLabel(owner.tr("Source: No model loaded"), sourceContainer);
+        sourceBadge->setStyleSheet(
+            "QLabel {"
+            "  background: rgba(0, 0, 0, 0.45);"
+            "  color: #ffffff;"
+            "  border-radius: 4px;"
+            "  padding: 3px 8px;"
+            "  font-size: 11px;"
+            "  font-weight: bold;"
+            "}"
+        );
+        sourceBadge->setFixedHeight(22);
+        srcLayout->addWidget(sourceBadge);
+
+        sourceViewport = new ViewportWidget(sourceContainer);
+        sourceViewport->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+        sourceViewport->setMinimumSize(180, 160);
+        srcLayout->addWidget(sourceViewport, 1);
+        splitter->addWidget(sourceContainer);
+
+        // 2B. Target Container
+        targetContainer = new QWidget(splitter);
+        auto* tgtLayout = new QVBoxLayout(targetContainer);
+        tgtLayout->setContentsMargins(0, 0, 0, 0);
+        tgtLayout->setSpacing(2);
+
+        targetBadge = new QLabel(owner.tr("Target: Waiting for conversion"), targetContainer);
+        targetBadge->setStyleSheet(
+            "QLabel {"
+            "  background: rgba(0, 0, 0, 0.45);"
+            "  color: #ffffff;"
+            "  border-radius: 4px;"
+            "  padding: 3px 8px;"
+            "  font-size: 11px;"
+            "  font-weight: bold;"
+            "}"
+        );
+        targetBadge->setFixedHeight(22);
+        tgtLayout->addWidget(targetBadge);
+
+        targetViewport = new ViewportWidget(targetContainer);
+        targetViewport->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+        targetViewport->setMinimumSize(180, 160);
+        tgtLayout->addWidget(targetViewport, 1);
+        splitter->addWidget(targetContainer);
+
+        // Set 50/50 initial split
+        splitter->setSizes({ 500, 500 });
+        mainLayout->addWidget(splitter, 1);
+
+        // --- 3. Camera Synchronization ---
+        QObject::connect(sourceViewport, &ViewportWidget::cameraChanged, &owner, [this](const OrbitCamera& cam) {
+            if (syncCamBtn->isChecked() && !isSyncingCam) {
+                isSyncingCam = true;
+                targetViewport->syncCamera(cam);
+                isSyncingCam = false;
+            }
+        });
+        QObject::connect(targetViewport, &ViewportWidget::cameraChanged, &owner, [this](const OrbitCamera& cam) {
+            if (syncCamBtn->isChecked() && !isSyncingCam) {
+                isSyncingCam = true;
+                sourceViewport->syncCamera(cam);
+                isSyncingCam = false;
+            }
+        });
+
+        // --- 4. Bottom Playback Toolbar ---
         playbackBar = new PlaybackBar(&owner);
         playbackBar->setFixedHeight(32);
         mainLayout->addWidget(playbackBar);
 
-        // Connect Viewport <-> PlaybackBar
-        QObject::connect(viewport, &ViewportWidget::playbackTimeChanged, playbackBar, &PlaybackBar::setTimeAndDuration);
-        QObject::connect(viewport, &ViewportWidget::playbackStateChanged, playbackBar, &PlaybackBar::setPlaying);
+        // Connect Viewports <-> PlaybackBar
+        QObject::connect(sourceViewport, &ViewportWidget::playbackTimeChanged, playbackBar, &PlaybackBar::setTimeAndDuration);
+        QObject::connect(sourceViewport, &ViewportWidget::playbackStateChanged, playbackBar, &PlaybackBar::setPlaying);
 
-        QObject::connect(playbackBar, &PlaybackBar::playToggled, viewport, &ViewportWidget::setPlaying);
-        QObject::connect(playbackBar, &PlaybackBar::rewindClicked, &owner, [this]() {
-            viewport->setTime(0.0f);
+        QObject::connect(playbackBar, &PlaybackBar::playToggled, &owner, [this](bool p) {
+            sourceViewport->setPlaying(p);
+            targetViewport->setPlaying(p);
         });
-        QObject::connect(playbackBar, &PlaybackBar::loopToggled, viewport, &ViewportWidget::setLooping);
-        QObject::connect(playbackBar, &PlaybackBar::timeSeeked, viewport, &ViewportWidget::setTime);
-        QObject::connect(playbackBar, &PlaybackBar::speedChanged, viewport, &ViewportWidget::setPlaybackSpeed);
+        QObject::connect(playbackBar, &PlaybackBar::rewindClicked, &owner, [this]() {
+            sourceViewport->setTime(0.0f);
+            targetViewport->setTime(0.0f);
+        });
+        QObject::connect(playbackBar, &PlaybackBar::loopToggled, &owner, [this](bool l) {
+            sourceViewport->setLooping(l);
+            targetViewport->setLooping(l);
+        });
+        QObject::connect(playbackBar, &PlaybackBar::timeSeeked, &owner, [this](float t) {
+            sourceViewport->setTime(t);
+            targetViewport->setTime(t);
+        });
+        QObject::connect(playbackBar, &PlaybackBar::speedChanged, &owner, [this](float spd) {
+            sourceViewport->setPlaybackSpeed(spd);
+            targetViewport->setPlaybackSpeed(spd);
+        });
 
-        QObject::connect(viewport, &ViewportWidget::modelLoaded, &owner, [this](size_t meshes, size_t verts, size_t bones) {
+        // Model loading badge update
+        QObject::connect(sourceViewport, &ViewportWidget::modelLoaded, &owner, [this](size_t meshes, size_t verts, size_t bones) {
             if (meshes > 0 || verts > 0) {
-                statsLabel->setText(QString("(%1 meshes, %2 verts, %3 bones)")
-                    .arg(meshes)
-                    .arg(verts)
-                    .arg(bones));
+                sourceBadge->setText(QString("Source: %1 (%2 meshes, %3 verts, %4 bones)")
+                    .arg(currentSourceTitle.isEmpty() ? owner.tr("Model") : currentSourceTitle)
+                    .arg(meshes).arg(verts).arg(bones));
             } else {
-                statsLabel->clear();
+                sourceBadge->setText(owner.tr("Source: No model loaded"));
             }
         });
+
+        QObject::connect(targetViewport, &ViewportWidget::modelLoaded, &owner, [this](size_t meshes, size_t verts, size_t bones) {
+            if (meshes > 0 || verts > 0) {
+                targetBadge->setText(QString("Target: %1 (%2 meshes, %3 verts, %4 bones)")
+                    .arg(currentTargetTitle.isEmpty() ? owner.tr("Model") : currentTargetTitle)
+                    .arg(meshes).arg(verts).arg(bones));
+            } else {
+                targetBadge->setText(owner.tr("Target: Waiting for conversion"));
+            }
+        });
+    }
+
+    void updateLayoutMode(ComparisonLayout layout) {
+        switch (layout) {
+            case ComparisonLayout::SideBySide:
+                splitter->setOrientation(Qt::Horizontal);
+                sourceContainer->setVisible(true);
+                targetContainer->setVisible(true);
+                splitter->setSizes({ 500, 500 });
+                break;
+            case ComparisonLayout::Stacked:
+                splitter->setOrientation(Qt::Vertical);
+                sourceContainer->setVisible(true);
+                targetContainer->setVisible(true);
+                splitter->setSizes({ 300, 300 });
+                break;
+            case ComparisonLayout::SourceOnly:
+                sourceContainer->setVisible(true);
+                targetContainer->setVisible(false);
+                break;
+            case ComparisonLayout::TargetOnly:
+                sourceContainer->setVisible(false);
+                targetContainer->setVisible(true);
+                break;
+        }
     }
 };
 
@@ -175,32 +314,56 @@ ModelViewerPanel::ModelViewerPanel(QWidget* parent)
 
 ModelViewerPanel::~ModelViewerPanel() = default;
 
-void ModelViewerPanel::loadModel(const GrnModel* model, const QString& title) {
-    _impl->currentModelTitle = title;
-    _impl->titleLabel->setText(title.isEmpty() ? tr("3D Preview") : title);
-    _impl->viewport->loadModel(model);
-}
-
-void ModelViewerPanel::playAnimation(const GrnAnimation* anim, const QString& animTitle) {
-    if (anim) {
-        QString disp = _impl->currentModelTitle;
-        if (!animTitle.isEmpty()) {
-            disp += QString(" — %1").arg(animTitle);
-        }
-        _impl->titleLabel->setText(disp);
-        _impl->viewport->playAnimation(anim);
-    } else {
-        _impl->titleLabel->setText(_impl->currentModelTitle.isEmpty() ? tr("3D Preview") : _impl->currentModelTitle);
-        _impl->viewport->stopAnimation();
+void ModelViewerPanel::loadSourceModel(const GrnModel* model, const QString& title) {
+    _impl->currentSourceTitle = title;
+    _impl->sourceViewport->loadModel(model);
+    if (!model) {
+        _impl->sourceBadge->setText(tr("Source: No model loaded"));
     }
 }
 
-void ModelViewerPanel::stopAnimation() {
-    _impl->viewport->stopAnimation();
+void ModelViewerPanel::loadTargetModel(const GrnModel* model, const QString& title) {
+    _impl->currentTargetTitle = title;
+    _impl->targetViewport->loadModel(model);
+    if (!model) {
+        _impl->targetBadge->setText(tr("Target: Waiting for conversion"));
+    }
 }
 
-ViewportWidget* ModelViewerPanel::viewport() const {
-    return _impl->viewport;
+void ModelViewerPanel::playSourceAnimation(const GrnAnimation* anim, const QString& /*animTitle*/) {
+    _impl->sourceViewport->playAnimation(anim);
+}
+
+void ModelViewerPanel::playTargetAnimation(const GrnAnimation* anim, const QString& /*animTitle*/) {
+    _impl->targetViewport->playAnimation(anim);
+}
+
+void ModelViewerPanel::playAnimation(const GrnAnimation* anim, const QString& animTitle) {
+    _impl->sourceViewport->playAnimation(anim);
+    _impl->targetViewport->playAnimation(anim);
+    (void)animTitle;
+}
+
+void ModelViewerPanel::stopAnimation() {
+    _impl->sourceViewport->stopAnimation();
+    _impl->targetViewport->stopAnimation();
+}
+
+void ModelViewerPanel::setModelScale(float s) {
+    _impl->sourceViewport->setModelScale(s);
+}
+
+void ModelViewerPanel::setComparisonLayout(ComparisonLayout layout) {
+    _impl->layoutCombo->setCurrentIndex(static_cast<int>(layout));
+    _impl->updateLayoutMode(layout);
+}
+
+ViewportWidget* ModelViewerPanel::sourceViewport() const {
+    return _impl->sourceViewport;
+}
+
+ViewportWidget* ModelViewerPanel::targetViewport() const {
+    return _impl->targetViewport;
 }
 
 PlaybackBar* ModelViewerPanel::playbackBar() const {

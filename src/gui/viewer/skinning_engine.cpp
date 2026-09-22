@@ -144,7 +144,7 @@ void SkinningEngine::evaluate(float time_seconds) {
                 skinned_positions_[mi].resize(mesh.vertices.size());
             }
             for (size_t vi = 0; vi < mesh.vertices.size(); ++vi) {
-                skinned_positions_[mi][vi] = QVector3D(mesh.vertices[vi].x, mesh.vertices[vi].y, mesh.vertices[vi].z);
+                skinned_positions_[mi][vi] = QVector3D(mesh.vertices[vi].x, mesh.vertices[vi].y, mesh.vertices[vi].z) * scale_;
             }
         }
         return;
@@ -230,9 +230,9 @@ void SkinningEngine::evaluate(float time_seconds) {
             }
 
             if (totalWeight > 1e-6f) {
-                skinned[vi] = sumPos / totalWeight;
+                skinned[vi] = (sumPos / totalWeight) * scale_;
             } else {
-                skinned[vi] = origPos;
+                skinned[vi] = origPos * scale_;
             }
         }
     }
