@@ -5,6 +5,10 @@
 #include "log_drawer.h"
 #include "section_card.h"
 #include "gui_utils.h"
+#include "viewer/model_viewer_panel.h"
+#include "viewer/viewport_widget.h"
+#include "../core/grn_parser.h"
+#include "../gltf/glb_reader.h"
 
 #include <oclero/qlementine/style/QlementineStyle.hpp>
 #include <oclero/qlementine/style/ThemeManager.hpp>
@@ -37,6 +41,8 @@
 #include <QApplication>
 #include <QGroupBox>
 #include <QFrame>
+#include <QDialog>
+#include <QAction>
 
 namespace grn {
 
@@ -47,7 +53,17 @@ struct MainWindow::Impl {
     QPointer<oclero::qlementine::ThemeManager> themeManager;
     ConversionWorker* worker{ nullptr };
 
-    // Layout
+    // Layout & 3D Viewer
+    QWidget* converterPanel{ nullptr };
+    ModelViewerPanel* modelViewer{ nullptr };
+    QAction* previewAction{ nullptr };
+    QToolButton* previewToggleBtn{ nullptr };
+    QPointer<QDialog> detachedDialog;
+    std::optional<GrnModel> loadedModel;
+    std::optional<GrnModel> cachedExternalAnimModel;
+    bool isPreviewVisible{ false };
+    QHBoxLayout* splitLayout{ nullptr };
+
     QVBoxLayout* rootLayout{ nullptr };
     QMenuBar* menuBar{ nullptr };
     QStatusBar* statusBar{ nullptr };
@@ -126,6 +142,13 @@ struct MainWindow::Impl {
         editMenu->addAction(makeThemedIcon(Icons16::Action_Trash), owner.tr("&Clear Log"), [this]() {
             logDrawer->clearLog();
         });
+
+        auto* viewMenu = menuBar->addMenu(owner.tr("&View"));
+        previewAction = viewMenu->addAction(makeThemedIcon(Icons16::Shape_Cube), owner.tr("3D &Preview"), QKeySequence(Qt::CTRL | Qt::Key_P), [this]() {
+            togglePreview(!isPreviewVisible);
+        });
+        previewAction->setCheckable(true);
+        previewAction->setChecked(false);
 
         auto* helpMenu = menuBar->addMenu(owner.tr("&Help"));
         helpMenu->addAction(makeThemedIcon(Icons16::Misc_Help), owner.tr("&About GRN Converter..."), [this]() {
@@ -223,9 +246,15 @@ struct MainWindow::Impl {
         QObject::connect(grnOptions, &GrnOptionsWidget::animFilesChanged, &owner, [this]() {
             updateBadges();
         });
+        QObject::connect(grnOptions, &GrnOptionsWidget::animationSelected, &owner, [this](const QString& animPath, int internalAnimIndex) {
+            onGrnAnimationSelected(animPath, internalAnimIndex);
+        });
         optionsStack->addWidget(grnOptions);
 
         glbOptions = new GlbOptionsWidget(optionsStack);
+        QObject::connect(glbOptions, &GlbOptionsWidget::animationSelected, &owner, [this](int animIndex) {
+            onGlbAnimationSelected(animIndex);
+        });
         optionsStack->addWidget(glbOptions);
     }
 
@@ -269,6 +298,17 @@ struct MainWindow::Impl {
             logDrawer->setVisible(chk);
         });
         statusBar->addPermanentWidget(logDrawerBtn);
+
+        previewToggleBtn = new QToolButton(statusBar);
+        previewToggleBtn->setIcon(makeThemedIcon(Icons16::Shape_Cube));
+        previewToggleBtn->setText(owner.tr("3D Preview"));
+        previewToggleBtn->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+        previewToggleBtn->setCheckable(true);
+        previewToggleBtn->setChecked(false);
+        QObject::connect(previewToggleBtn, &QToolButton::toggled, &owner, [this](bool chk) {
+            togglePreview(chk);
+        });
+        statusBar->addPermanentWidget(previewToggleBtn);
     }
 
     void setupLogDrawer() {
@@ -283,17 +323,41 @@ struct MainWindow::Impl {
     }
 
     void setupLayout() {
-        rootLayout = new QVBoxLayout(&owner);
-        rootLayout->setContentsMargins(8, 0, 8, 0);
-        rootLayout->setSpacing(6);
-        rootLayout->setMenuBar(menuBar);
-        rootLayout->addWidget(navBar);
-        rootLayout->addWidget(oclero::qlementine::makeHorizontalLine(&owner));
-        rootLayout->addWidget(fileBoxWidget);
-        rootLayout->addWidget(optionsStack, 1);
-        rootLayout->addWidget(convertBtn);
-        rootLayout->addWidget(logDrawer);
-        rootLayout->addWidget(statusBar);
+        converterPanel = new QWidget(&owner);
+        converterPanel->setFixedWidth(400);
+
+        auto* convLayout = new QVBoxLayout(converterPanel);
+        convLayout->setContentsMargins(8, 0, 8, 0);
+        convLayout->setSpacing(6);
+        convLayout->addWidget(navBar);
+        convLayout->addWidget(oclero::qlementine::makeHorizontalLine(&owner));
+        convLayout->addWidget(fileBoxWidget);
+        convLayout->addWidget(optionsStack, 1);
+        convLayout->addWidget(convertBtn);
+        convLayout->addWidget(logDrawer);
+        convLayout->addWidget(statusBar);
+
+        modelViewer = new ModelViewerPanel(&owner);
+        modelViewer->setVisible(false);
+        QObject::connect(modelViewer, &ModelViewerPanel::closeRequested, &owner, [this]() {
+            togglePreview(false);
+        });
+        QObject::connect(modelViewer, &ModelViewerPanel::detachRequested, &owner, [this]() {
+            detachPreview();
+        });
+
+        auto* outerLayout = new QVBoxLayout(&owner);
+        outerLayout->setContentsMargins(0, 0, 0, 0);
+        outerLayout->setSpacing(0);
+        outerLayout->setMenuBar(menuBar);
+
+        splitLayout = new QHBoxLayout();
+        splitLayout->setContentsMargins(0, 0, 0, 0);
+        splitLayout->setSpacing(0);
+        splitLayout->addWidget(converterPanel);
+        splitLayout->addWidget(modelViewer, 1);
+
+        outerLayout->addLayout(splitLayout, 1);
     }
 
     void onInputPathChanged() {
@@ -328,6 +392,124 @@ struct MainWindow::Impl {
         grnOptions->setModel(path);
         glbOptions->setModel(path);
         updateBadges();
+
+        loadedModel.reset();
+        cachedExternalAnimModel.reset();
+
+        if (!path.isEmpty()) {
+            QFileInfo fi(path);
+            if (fi.exists() && fi.isFile()) {
+                QString ext = fi.suffix().toLower();
+                if (ext == "grn") {
+                    loadedModel = parse_grn_file(fi.filesystemFilePath());
+                } else if (ext == "glb" || ext == "gltf") {
+                    GlbImportOptions opt;
+                    opt.y_up = true;
+                    opt.texture_dir = fi.dir().filesystemAbsolutePath();
+                    loadedModel = load_glb_file(fi.filesystemFilePath(), opt);
+                }
+            }
+        }
+
+        if (isPreviewVisible) {
+            if (loadedModel) {
+                QFileInfo fi(path);
+                modelViewer->loadModel(&*loadedModel, fi.fileName());
+            } else {
+                modelViewer->loadModel(nullptr, QString());
+            }
+        }
+    }
+
+    void togglePreview(bool show) {
+        if (isPreviewVisible == show) return;
+        isPreviewVisible = show;
+
+        if (previewAction) previewAction->setChecked(show);
+        if (previewToggleBtn) {
+            previewToggleBtn->blockSignals(true);
+            previewToggleBtn->setChecked(show);
+            previewToggleBtn->blockSignals(false);
+        }
+
+        if (show) {
+            owner.setMinimumWidth(800);
+            owner.setMaximumWidth(QWIDGETSIZE_MAX);
+            if (modelViewer->parent() != &owner) {
+                splitLayout->addWidget(modelViewer, 1);
+            }
+            modelViewer->setVisible(true);
+            owner.resize(1040, owner.height());
+            if (loadedModel) {
+                QFileInfo fi(inputEdit->text());
+                modelViewer->loadModel(&*loadedModel, fi.fileName());
+            }
+        } else {
+            modelViewer->setVisible(false);
+            owner.setFixedWidth(400);
+            owner.resize(400, owner.height());
+        }
+    }
+
+    void detachPreview() {
+        if (!detachedDialog) {
+            detachedDialog = new QDialog(&owner);
+            detachedDialog->setWindowTitle(owner.tr("3D Model Preview"));
+            detachedDialog->resize(720, 680);
+
+            auto* dlgLayout = new QVBoxLayout(detachedDialog);
+            dlgLayout->setContentsMargins(0, 0, 0, 0);
+            dlgLayout->addWidget(modelViewer);
+            modelViewer->setVisible(true);
+
+            QObject::connect(detachedDialog, &QDialog::finished, &owner, [this](int) {
+                splitLayout->addWidget(modelViewer, 1);
+                togglePreview(false);
+            });
+            detachedDialog->show();
+
+            owner.setFixedWidth(400);
+            owner.resize(400, owner.height());
+        } else {
+            detachedDialog->show();
+            detachedDialog->raise();
+            detachedDialog->activateWindow();
+        }
+    }
+
+    void onGrnAnimationSelected(const QString& animPath, int internalAnimIndex) {
+        if (internalAnimIndex >= 0 && loadedModel && static_cast<size_t>(internalAnimIndex) < loadedModel->animations.size()) {
+            togglePreview(true);
+            const auto& a = loadedModel->animations[internalAnimIndex];
+            modelViewer->playAnimation(&a, QString::fromStdString(a.name));
+            return;
+        }
+
+        if (!animPath.isEmpty()) {
+            togglePreview(true);
+            cachedExternalAnimModel = parse_grn_file(std::filesystem::path(animPath.toStdWString()));
+            if (cachedExternalAnimModel && !cachedExternalAnimModel->animations.empty()) {
+                const auto& a = cachedExternalAnimModel->animations[0];
+                modelViewer->playAnimation(&a, QFileInfo(animPath).fileName());
+                return;
+            }
+        }
+
+        if (isPreviewVisible) {
+            modelViewer->stopAnimation();
+        }
+    }
+
+    void onGlbAnimationSelected(int animIndex) {
+        if (animIndex >= 0 && loadedModel && static_cast<size_t>(animIndex) < loadedModel->animations.size()) {
+            togglePreview(true);
+            const auto& a = loadedModel->animations[animIndex];
+            modelViewer->playAnimation(&a, QString::fromStdString(a.name));
+        } else {
+            if (isPreviewVisible) {
+                modelViewer->stopAnimation();
+            }
+        }
     }
 
     void updateBadges() {
@@ -508,6 +690,23 @@ void MainWindow::dropEvent(QDropEvent* event) {
             event->acceptProposedAction();
         }
     }
+}
+
+void MainWindow::setPreviewVisible(bool visible) {
+    _impl->togglePreview(visible);
+}
+
+bool MainWindow::isPreviewVisible() const {
+    return _impl->isPreviewVisible;
+}
+
+void MainWindow::addExternalAnimation(const QString& path) {
+    _impl->grnOptions->addExternalAnimFile(path);
+    _impl->updateBadges();
+}
+
+void MainWindow::selectAnimationItem(int index) {
+    _impl->grnOptions->selectAnimationItem(index);
 }
 
 } // namespace grn

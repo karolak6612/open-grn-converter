@@ -31,7 +31,7 @@ if(WIN32 AND NOT DEFINED CMAKE_PREFIX_PATH AND EXISTS "C:/Qt/6.11.2/msvc2022_64"
 endif()
 
 # Find external dependencies
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Svg Concurrent)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Svg Concurrent OpenGL OpenGLWidgets)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(Stb REQUIRED)
 
@@ -109,6 +109,14 @@ set(GRN_APP_SOURCES
     src/gui/grn_options_widget.cpp
     src/gui/glb_options_widget.cpp
     src/gui/log_drawer.cpp
+    src/gui/viewer/camera.cpp
+    src/gui/viewer/grn_anim_sampler.cpp
+    src/gui/viewer/skinning_engine.cpp
+    src/gui/viewer/shader_gl.cpp
+    src/gui/viewer/mesh_gl.cpp
+    src/gui/viewer/playback_bar.cpp
+    src/gui/viewer/viewport_widget.cpp
+    src/gui/viewer/model_viewer_panel.cpp
 )
 
 set(GRN_APP_HEADERS
@@ -120,6 +128,14 @@ set(GRN_APP_HEADERS
     src/gui/log_drawer.h
     src/gui/section_card.h
     src/gui/gui_utils.h
+    src/gui/viewer/camera.h
+    src/gui/viewer/grn_anim_sampler.h
+    src/gui/viewer/skinning_engine.h
+    src/gui/viewer/shader_gl.h
+    src/gui/viewer/mesh_gl.h
+    src/gui/viewer/playback_bar.h
+    src/gui/viewer/viewport_widget.h
+    src/gui/viewer/model_viewer_panel.h
 )
 
 set(GRN_APP_RESOURCES
@@ -149,6 +165,8 @@ target_link_libraries(grn_converter
         Qt6::Widgets
         Qt6::Svg
         Qt6::Concurrent
+        Qt6::OpenGL
+        Qt6::OpenGLWidgets
         qlementine
         qlementine-icons
 )
@@ -223,3 +241,23 @@ add_grn_test(test_writer tests/test_writer.cpp)
 add_grn_test(test_roundtrip tests/test_roundtrip.cpp)
 add_grn_test(test_texture_hue tests/test_texture_hue.cpp)
 add_grn_test(test_viewer_compat tests/test_viewer_compat.cpp)
+
+add_executable(test_viewer_engine
+    tests/test_viewer_engine.cpp
+    src/gui/viewer/camera.cpp
+    src/gui/viewer/grn_anim_sampler.cpp
+    src/gui/viewer/skinning_engine.cpp
+)
+target_include_directories(test_viewer_engine
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${Stb_INCLUDE_DIR}
+)
+target_link_libraries(test_viewer_engine
+    PRIVATE
+        grn_core
+        Qt6::Core
+        Qt6::Gui
+)
+add_test(NAME test_viewer_engine COMMAND test_viewer_engine)
+

@@ -155,6 +155,15 @@ struct GlbOptionsWidget::Impl {
         treeWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
         cardLayout->addWidget(treeWidget);
 
+        QObject::connect(treeWidget, &QTreeWidget::currentItemChanged, &owner, [this](QTreeWidgetItem* current, QTreeWidgetItem*) {
+            if (!current) {
+                emit owner.animationSelected(-1);
+                return;
+            }
+            int animIdx = current->data(0, Qt::UserRole).isValid() ? current->data(0, Qt::UserRole).toInt() : -1;
+            emit owner.animationSelected(animIdx);
+        });
+
         animLayout->addWidget(animCard, 1);
 
         layout->addWidget(animSectionWidget, 1);
@@ -195,23 +204,27 @@ struct GlbOptionsWidget::Impl {
                 .arg(model->meshes.size())
                 .arg(model->bones.size()));
             rootItem->setExpanded(true);
+            rootItem->setData(0, Qt::UserRole, -1);
 
             if (model->animations.empty()) {
                 auto* infoItem = new QTreeWidgetItem(rootItem);
                 infoItem->setText(0, owner.tr("(No animation clips found in model)"));
                 infoItem->setFlags(Qt::NoItemFlags);
             } else {
-                for (const auto& anim : model->animations) {
+                for (size_t ai = 0; ai < model->animations.size(); ++ai) {
+                    const auto& anim = model->animations[ai];
                     auto* animItem = new QTreeWidgetItem(rootItem);
                     animItem->setIcon(0, makeThemedIcon(Icons16::Media_Play));
                     animItem->setText(0, QString("%1 (%2s) → %3_%1.grn")
                         .arg(QString::fromStdString(anim.name))
                         .arg(anim.duration, 0, 'f', 2)
                         .arg(fi.completeBaseName()));
+                    animItem->setData(0, Qt::UserRole, static_cast<int>(ai));
                 }
             }
         } else {
             rootItem->setText(0, fi.fileName());
+            rootItem->setData(0, Qt::UserRole, -1);
         }
     }
 

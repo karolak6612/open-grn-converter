@@ -217,6 +217,16 @@ struct GrnOptionsWidget::Impl {
         treeWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
         cardLayout->addWidget(treeWidget);
 
+        QObject::connect(treeWidget, &QTreeWidget::currentItemChanged, &owner, [this](QTreeWidgetItem* current, QTreeWidgetItem*) {
+            if (!current) {
+                emit owner.animationSelected(QString(), -1);
+                return;
+            }
+            QString animPath = current->data(0, Qt::UserRole).toString();
+            int intIdx = current->data(0, Qt::UserRole + 1).isValid() ? current->data(0, Qt::UserRole + 1).toInt() : -1;
+            emit owner.animationSelected(animPath, intIdx);
+        });
+
         animLayout->addWidget(animCard, 1);
 
         layout->addWidget(animSectionWidget, 1);
@@ -306,9 +316,22 @@ struct GrnOptionsWidget::Impl {
                 .arg(fi.fileName())
                 .arg(model->meshes.size())
                 .arg(model->bones.size()));
+
+            for (size_t ai = 0; ai < model->animations.size(); ++ai) {
+                const auto& a = model->animations[ai];
+                if (a.tracks.empty()) continue;
+                auto* animItem = new QTreeWidgetItem(rootItem);
+                animItem->setIcon(0, makeThemedIcon(Icons16::Media_Play));
+                QString name = QString::fromStdString(a.name.empty() ? ("Animation_" + std::to_string(ai)) : a.name);
+                animItem->setText(0, QString("%1 (%2s)").arg(name).arg(a.duration, 0, 'f', 2));
+                animItem->setData(0, Qt::UserRole, QString());
+                animItem->setData(0, Qt::UserRole + 1, static_cast<int>(ai));
+            }
         } else {
             rootItem->setText(0, fi.fileName());
         }
+        rootItem->setData(0, Qt::UserRole, QString());
+        rootItem->setData(0, Qt::UserRole + 1, -1);
         rootItem->setExpanded(true);
 
         if (externalAnims.empty()) {
@@ -321,6 +344,8 @@ struct GrnOptionsWidget::Impl {
                 animItem->setIcon(0, makeThemedIcon(Icons16::Media_Play));
                 animItem->setText(0, QString::fromStdString(animPath.filename().string()));
                 animItem->setToolTip(0, QString::fromStdString(animPath.string()));
+                animItem->setData(0, Qt::UserRole, QString::fromStdString(animPath.string()));
+                animItem->setData(0, Qt::UserRole + 1, -1);
             }
         }
     }
@@ -390,6 +415,15 @@ void GrnOptionsWidget::addExternalAnimFile(const QString& path) {
 
 void GrnOptionsWidget::clearExternalAnims() {
     _impl->onClear();
+}
+
+void GrnOptionsWidget::selectAnimationItem(int index) {
+    if (!_impl->treeWidget) return;
+    auto* root = _impl->treeWidget->topLevelItem(0);
+    if (!root) return;
+    if (index >= 0 && index < root->childCount()) {
+        _impl->treeWidget->setCurrentItem(root->child(index));
+    }
 }
 
 void GrnOptionsWidget::setEmbedTextures(bool embed) {

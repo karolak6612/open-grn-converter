@@ -35,9 +35,14 @@ int main(int argc, char* argv[]) {
     std::optional<bool> embed_anims_opt;
     std::optional<bool> embed_textures_opt;
     std::optional<int> active_tab_opt;
+    bool preview_opt = false;
+    std::string external_anim;
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
         if (arg == "--gui") {
+            force_gui = true;
+        } else if (arg == "--preview") {
+            preview_opt = true;
             force_gui = true;
         } else if (arg == "--screenshot" && i + 1 < argc) {
             screenshot_path = argv[++i];
@@ -46,6 +51,9 @@ int main(int argc, char* argv[]) {
             initial_theme = argv[++i];
         } else if (arg == "--model" && i + 1 < argc) {
             preloaded_model = argv[++i];
+            force_gui = true;
+        } else if (arg == "--anim" && i + 1 < argc) {
+            external_anim = argv[++i];
             force_gui = true;
         } else if (arg == "--convert") {
             auto_convert = true;
@@ -102,6 +110,13 @@ int main(int argc, char* argv[]) {
         if (active_tab_opt.has_value()) {
             window.setActiveTab(*active_tab_opt);
         }
+        if (!external_anim.empty()) {
+            window.addExternalAnimation(QString::fromStdString(external_anim));
+            window.selectAnimationItem(0);
+        }
+        if (preview_opt) {
+            window.setPreviewVisible(true);
+        }
         window.show();
         app.processEvents();
 
@@ -126,8 +141,8 @@ int main(int argc, char* argv[]) {
 #endif
             }
             QPixmap pixmap = window.grab();
-            pixmap.save(QString::fromStdString(screenshot_path), "PNG");
-            return 0;
+            bool ok = pixmap.save(QString::fromStdString(screenshot_path), "PNG");
+            return ok ? 0 : 1;
         }
 
         return app.exec();

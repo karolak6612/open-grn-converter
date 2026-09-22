@@ -27,6 +27,7 @@ public:
     std::vector<std::filesystem::path> externalAnimFiles() const;
     void addExternalAnimFile(const QString& path);
     void clearExternalAnims();
+    void selectAnimationItem(int index);
 
     void setEmbedTextures(bool embed);
     void setEmbedAnimations(bool enabled);
@@ -35,6 +36,7 @@ public:
 signals:
     void optionsChanged();
     void animFilesChanged();
+    void animationSelected(const QString& animPath, int internalAnimIndex);
 
 private:
     struct Impl;

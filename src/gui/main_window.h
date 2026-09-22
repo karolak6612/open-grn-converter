@@ -24,6 +24,10 @@ public:
     void setEmbedAnims(bool enabled);
     void setEmbedTextures(bool enabled);
     void setActiveTab(int index);
+    void setPreviewVisible(bool visible);
+    bool isPreviewVisible() const;
+    void addExternalAnimation(const QString& path);
+    void selectAnimationItem(int index);
 
 protected:
     void dragEnterEvent(QDragEnterEvent* event) override;

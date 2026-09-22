@@ -26,6 +26,7 @@ public:
 
 signals:
     void optionsChanged();
+    void animationSelected(int animIndex);
 
 private:
     struct Impl;
