@@ -132,10 +132,79 @@ static void test_model_optimizer_roundtrip() {
               << " partitioned Granny 1.2b meshes.\n";
 }
 
+static void test_multi_material_tri_groups_split() {
+    std::cout << "[TEST] Multi-material tri_groups 16-bit partitioning..." << std::endl;
+
+    grn::GrnMesh mesh;
+    mesh.name = "Centipede_MultiMat";
+
+    // 3 groups: 30k (mat 0), 20k (mat 1), 35k (mat 2) => total 85k vertices
+    const uint32_t count0 = 30000;
+    const uint32_t count1 = 20000;
+    const uint32_t count2 = 35000;
+    const uint32_t total_verts = count0 + count1 + count2;
+
+    mesh.vertices.resize(total_verts);
+    mesh.normals.resize(total_verts);
+    mesh.uvs.resize(total_verts);
+    mesh.weights.resize(total_verts);
+
+    for (uint32_t i = 0; i < total_verts; ++i) {
+        mesh.vertices[i] = { static_cast<float>(i), 0.0f, 0.0f };
+        mesh.normals[i] = { 0.0f, 1.0f, 0.0f };
+        mesh.uvs[i] = { 0.25f, 0.75f };
+        mesh.weights[i].bone_indices.push_back(0);
+        mesh.weights[i].bone_weights.push_back(1.0f);
+    }
+
+    auto make_group = [&](uint32_t start_v, uint32_t num_v, int32_t mat_id, const std::string& mat_name) {
+        grn::GrnTriGroup g;
+        g.material_index = mat_id;
+        g.material_name = mat_name;
+        uint32_t num_t = (num_v - 2) / 2;
+        for (uint32_t t = 0; t < num_t; ++t) {
+            uint32_t v0 = start_v + t * 2;
+            uint32_t v1 = start_v + t * 2 + 1;
+            uint32_t v2 = start_v + t * 2 + 2;
+            g.faces.push_back({ v0, v1, v2 });
+            g.face_normals.push_back({ v0, v1, v2 });
+            g.face_uvs.push_back({ v0, v1, v2 });
+
+            mesh.faces.push_back({ v0, v1, v2 });
+            mesh.face_normals.push_back({ v0, v1, v2 });
+            mesh.face_uvs.push_back({ v0, v1, v2 });
+        }
+        return g;
+    };
+
+    mesh.tri_groups.push_back(make_group(0, count0, 0, "legs"));
+    mesh.tri_groups.push_back(make_group(count0, count1, 1, "body"));
+    mesh.tri_groups.push_back(make_group(count0 + count1, count2, 2, "arm"));
+
+    auto parts = grn::split_mesh_16bit(mesh, 64000);
+    assert(parts.size() == 2);
+
+    // Part 0 should cleanly contain legs (30k) + body (20k) = 50k <= 64k
+    assert(parts[0].vertices.size() == count0 + count1);
+    assert(parts[0].tri_groups.size() == 2);
+    assert(parts[0].tri_groups[0].material_name == "legs");
+    assert(parts[0].tri_groups[1].material_name == "body");
+
+    // Part 1 should cleanly contain arm (35k) <= 64k
+    assert(parts[1].vertices.size() == count2);
+    assert(parts[1].tri_groups.size() == 1);
+    assert(parts[1].tri_groups[0].material_name == "arm");
+
+    std::cout << "  ✓ Multi-material tri_groups partitioned with 0 cuts: "
+              << "Part 0 has " << parts[0].tri_groups.size() << " groups (" << parts[0].vertices.size() << " verts), "
+              << "Part 1 has " << parts[1].tri_groups.size() << " groups (" << parts[1].vertices.size() << " verts).\n";
+}
+
 int main() {
     try {
         test_split_97k_mesh();
         test_model_optimizer_roundtrip();
+        test_multi_material_tri_groups_split();
         std::cout << "\n[PASS] All mesh optimizer tests passed successfully!\n";
         return 0;
     } catch (const std::exception& ex) {

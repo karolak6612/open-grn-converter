@@ -237,14 +237,24 @@ struct GlbOptionsWidget::Impl {
                 infoItem->setText(0, owner.tr("(No animation clips found in model)"));
                 infoItem->setFlags(Qt::NoItemFlags);
             } else {
+                QString baseName = fi.completeBaseName();
                 for (size_t ai = 0; ai < model->animations.size(); ++ai) {
                     const auto& anim = model->animations[ai];
                     auto* animItem = new QTreeWidgetItem(rootItem);
                     animItem->setIcon(0, makeThemedIcon(Icons16::Media_Play));
-                    animItem->setText(0, QString("%1 (%2s) → %3_%1.grn")
-                        .arg(QString::fromStdString(anim.name))
+                    QString aName = QString::fromStdString(anim.name);
+                    QString targetAnimName;
+                    if (aName.startsWith(baseName + "_", Qt::CaseInsensitive) || aName.startsWith(baseName + "-", Qt::CaseInsensitive)) {
+                        targetAnimName = aName;
+                    } else if (aName.compare(baseName, Qt::CaseInsensitive) == 0) {
+                        targetAnimName = baseName + "_anim";
+                    } else {
+                        targetAnimName = baseName + "_" + aName;
+                    }
+                    animItem->setText(0, QString("%1 (%2s) → %3.grn")
+                        .arg(aName)
                         .arg(anim.duration, 0, 'f', 2)
-                        .arg(fi.completeBaseName()));
+                        .arg(targetAnimName));
                     animItem->setData(0, Qt::UserRole, static_cast<int>(ai));
                 }
             }

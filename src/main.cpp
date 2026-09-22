@@ -122,14 +122,21 @@ int main(int argc, char* argv[]) {
 
         if (auto_convert) {
             window.executeConversion();
+#ifdef _WIN32
+            Sleep(100);
+#endif
+            app.processEvents();
             while (window.isConverting()) {
                 app.processEvents();
 #ifdef _WIN32
                 Sleep(20);
 #endif
             }
-            for (int f = 0; f < 10; ++f) {
+            for (int f = 0; f < 30; ++f) {
                 app.processEvents();
+#ifdef _WIN32
+                Sleep(10);
+#endif
             }
         }
 

@@ -303,6 +303,18 @@ bool convert_file(const std::filesystem::path& input,
             auto out_dir = out_path.parent_path();
             std::string stem = out_path.stem().string();
 
+            // Case-insensitive prefix check to avoid double-prefixing (e.g. centi_centi_Centipede_Walk.grn)
+            auto starts_with_ci = [](const std::string& str, const std::string& prefix) -> bool {
+                if (str.size() < prefix.size()) return false;
+                for (size_t i = 0; i < prefix.size(); ++i) {
+                    if (std::tolower(static_cast<unsigned char>(str[i])) !=
+                        std::tolower(static_cast<unsigned char>(prefix[i]))) {
+                        return false;
+                    }
+                }
+                return true;
+            };
+
             std::unordered_set<std::string> used_anim_filenames;
             for (size_t ai = 0; ai < model->animations.size(); ++ai) {
                 const auto& anim = model->animations[ai];
@@ -312,14 +324,24 @@ bool convert_file(const std::filesystem::path& input,
                         c = '_';
                     }
                 }
-                std::string unique_anim_filename = safe_anim_name;
+
+                std::string anim_base_name;
+                if (starts_with_ci(safe_anim_name, stem + "_") || starts_with_ci(safe_anim_name, stem + "-")) {
+                    anim_base_name = safe_anim_name;
+                } else if (safe_anim_name == stem) {
+                    anim_base_name = stem + "_anim";
+                } else {
+                    anim_base_name = stem + "_" + safe_anim_name;
+                }
+
+                std::string unique_anim_filename = anim_base_name;
                 int counter = 1;
-                while (used_anim_filenames.count(unique_anim_filename)) {
-                    unique_anim_filename = safe_anim_name + "_" + std::to_string(counter++);
+                while (used_anim_filenames.count(unique_anim_filename) || unique_anim_filename == stem) {
+                    unique_anim_filename = anim_base_name + "_" + std::to_string(counter++);
                 }
                 used_anim_filenames.insert(unique_anim_filename);
 
-                std::filesystem::path anim_out = out_dir / (stem + "_" + unique_anim_filename + ".grn");
+                std::filesystem::path anim_out = out_dir / (unique_anim_filename + ".grn");
 
                 GrnModel anim_model;
                 anim_model.bones = model->bones;

@@ -731,12 +731,19 @@ struct MainWindow::Impl {
                 const auto& a = clipModel->animations[0];
                 modelViewer->playTargetAnimation(&a, QFileInfo(clipPath).fileName());
 
-                if (loadedModel) {
+                if (loadedModel && !loadedModel->animations.empty()) {
+                    bool found = false;
                     for (const auto& sa : loadedModel->animations) {
-                        if (sa.name == a.name) {
+                        if (sa.name == a.name ||
+                            sa.name.ends_with(a.name) ||
+                            a.name.ends_with(sa.name)) {
                             modelViewer->playSourceAnimation(&sa, QString::fromStdString(sa.name));
+                            found = true;
                             break;
                         }
+                    }
+                    if (!found && loadedModel->animations.size() == 1) {
+                        modelViewer->playSourceAnimation(&loadedModel->animations[0], QString::fromStdString(loadedModel->animations[0].name));
                     }
                 }
             }
@@ -809,6 +816,11 @@ struct MainWindow::Impl {
         if (outDir.isEmpty()) {
             outDir = fi.dir().absolutePath();
             outputEdit->setText(outDir);
+        } else {
+            QFileInfo outFi(outDir);
+            if (outFi.isFile() || outDir.endsWith(".grn", Qt::CaseInsensitive) || outDir.endsWith(".glb", Qt::CaseInsensitive)) {
+                outDir = outFi.dir().absolutePath();
+            }
         }
 
         bool isGrnToGlb = (navBar->currentIndex() == 0);
