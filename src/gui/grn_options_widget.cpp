@@ -68,8 +68,8 @@ struct GrnOptionsWidget::Impl {
         optLayout->setHorizontalSpacing(6);
 
         coordSwitch = new oclero::qlementine::Switch(optCard);
-        coordSwitch->setChecked(true);
-        coordSwitch->setToolTip(owner.tr("Convert Granny Z-up coordinates to standard glTF Y-up coordinates"));
+        coordSwitch->setChecked(false);
+        coordSwitch->setToolTip(owner.tr("Swizzle coordinates between Z-up and Y-up (leave OFF for Sacred Gold and standard glTF models)"));
         QObject::connect(coordSwitch, &oclero::qlementine::Switch::clicked, &owner, [this]() {
             emit owner.optionsChanged();
         });

@@ -19,6 +19,7 @@ public:
     void clearTarget();
 
     void selectAnimationItem(int index);
+    void markOutdated(bool outdated = true);
 
 signals:
     void animationSelected(int animIndex, const QString& clipPath);

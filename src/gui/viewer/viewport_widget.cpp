@@ -62,13 +62,13 @@ void ViewportWidget::initializeGL() {
 void ViewportWidget::setupGridGeometry() {
     constexpr float kExtent = 5000.0f;
     const float quadVertices[] = {
-        -kExtent, -kExtent, 0.0f,
-         kExtent, -kExtent, 0.0f,
-         kExtent,  kExtent, 0.0f,
+        -kExtent, 0.0f, -kExtent,
+         kExtent, 0.0f, -kExtent,
+         kExtent, 0.0f,  kExtent,
 
-        -kExtent, -kExtent, 0.0f,
-         kExtent,  kExtent, 0.0f,
-        -kExtent,  kExtent, 0.0f
+        -kExtent, 0.0f, -kExtent,
+         kExtent, 0.0f,  kExtent,
+        -kExtent, 0.0f,  kExtent
     };
 
     glGenBuffers(1, &grid_vbo_);

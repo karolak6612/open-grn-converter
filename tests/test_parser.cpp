@@ -112,10 +112,58 @@ static void test_parser_synthetic_animation() {
     std::cout << "  GRN parser synthetic animation test passed." << std::endl;
 }
 
+static void test_parser_glb_rotor_weights() {
+    std::filesystem::path rotor_path = "test_data/Gladiator_Rotor.glb";
+    if (!std::filesystem::exists(rotor_path)) {
+        std::cout << "  [SKIP] Gladiator_Rotor.glb not present." << std::endl;
+        return;
+    }
+    std::cout << "[TEST] GLB Reader Gladiator_Rotor.glb bone weights..." << std::endl;
+    grn::GlbImportOptions opt;
+    auto model = grn::load_glb_file(rotor_path, opt);
+    assert(model.has_value());
+    assert(model->bones.size() == 81);
+
+    // Check that rotor bones (joints 68..80) are referenced in mesh weights
+    bool found_rotor_joint = false;
+    for (const auto& mesh : model->meshes) {
+        for (const auto& vw : mesh.weights) {
+            for (int32_t b : vw.bone_indices) {
+                if (b >= 68 && b <= 80) {
+                    found_rotor_joint = true;
+                    break;
+                }
+            }
+            if (found_rotor_joint) break;
+        }
+        if (found_rotor_joint) break;
+    }
+    assert(found_rotor_joint && "Rotor bones 68..80 must be present in mesh weights!");
+    std::cout << "  Gladiator_Rotor bone weights test passed (rotor joints 68..80 verified)." << std::endl;
+}
+
+static void inspect_centi_grn() {
+    auto model = grn::parse_grn_file("test_data/centi.grn");
+    if (model) {
+        std::cout << "centi.grn has " << model->meshes.size() << " meshes:\n";
+        size_t total_v = 0, total_t = 0;
+        for (size_t i = 0; i < model->meshes.size(); ++i) {
+            const auto& m = model->meshes[i];
+            std::cout << "  Mesh " << i << " (" << m.name << "): "
+                      << m.vertices.size() << " verts, " << m.faces.size() << " tris\n";
+            total_v += m.vertices.size();
+            total_t += m.faces.size();
+        }
+        std::cout << "Total: " << total_v << " verts, " << total_t << " tris\n";
+    }
+}
+
 int main() {
     std::cout << "=== Running Parser Unit Tests ===" << std::endl;
     test_parser_synthetic_model();
     test_parser_synthetic_animation();
+    test_parser_glb_rotor_weights();
+    inspect_centi_grn();
     std::cout << "All parser tests passed successfully." << std::endl;
     return 0;
 }

@@ -12,6 +12,7 @@
 #include <QGroupBox>
 #include <QComboBox>
 #include <QDoubleSpinBox>
+#include <QSpinBox>
 #include <QLabel>
 #include <QTreeWidget>
 #include <QTreeWidgetItem>
@@ -35,6 +36,8 @@ struct GlbOptionsWidget::Impl {
     oclero::qlementine::Switch* splitAnimsSwitch{ nullptr };
     oclero::qlementine::Switch* autoSplit16BitSwitch{ nullptr };
     QLabel* optimizerStatusLabel{ nullptr };
+    oclero::qlementine::Switch* decimateSwitch{ nullptr };
+    QSpinBox* targetVertsSpin{ nullptr };
     size_t lastAnalyzedMaxVerts{ 0 };
     bool lastAnalyzedExceeded{ false };
     bool userManuallyToggled{ false };
@@ -69,8 +72,8 @@ struct GlbOptionsWidget::Impl {
         optLayout->setHorizontalSpacing(6);
 
         coordSwitch = new oclero::qlementine::Switch(optCard);
-        coordSwitch->setChecked(true);
-        coordSwitch->setToolTip(owner.tr("Convert glTF standard Y-up coordinates to Granny Z-up coordinates"));
+        coordSwitch->setChecked(false);
+        coordSwitch->setToolTip(owner.tr("Swizzle coordinates between Y-up and Z-up (leave OFF for Sacred Gold and standard glTF models)"));
         QObject::connect(coordSwitch, &oclero::qlementine::Switch::clicked, &owner, [this]() {
             emit owner.optionsChanged();
         });
@@ -150,6 +153,35 @@ struct GlbOptionsWidget::Impl {
             emit owner.optionsChanged();
         });
         optLayout->addRow(owner.tr("Mesh Optimizer (16-bit):"), optRow);
+ 
+        auto* decimateRow = new QHBoxLayout();
+        decimateRow->setContentsMargins(0, 0, 0, 0);
+        decimateRow->setSpacing(6);
+
+        decimateSwitch = new oclero::qlementine::Switch(optCard);
+        decimateSwitch->setChecked(false);
+        decimateSwitch->setToolTip(owner.tr("Reduce polygon and vertex count via quadric error decimation to safely fit within game engine limits while preserving materials and UVs"));
+        decimateRow->addWidget(decimateSwitch);
+
+        targetVertsSpin = new QSpinBox(optCard);
+        targetVertsSpin->setRange(1000, 65000);
+        targetVertsSpin->setValue(30000);
+        targetVertsSpin->setSingleStep(2500);
+        targetVertsSpin->setSuffix(" verts");
+        targetVertsSpin->setEnabled(false);
+        targetVertsSpin->setFixedHeight(24);
+        targetVertsSpin->setToolTip(owner.tr("Target maximum vertex budget for decimation"));
+        decimateRow->addWidget(targetVertsSpin);
+        decimateRow->addStretch(1);
+
+        QObject::connect(decimateSwitch, &oclero::qlementine::Switch::clicked, &owner, [this]() {
+            targetVertsSpin->setEnabled(decimateSwitch->isChecked());
+            emit owner.optionsChanged();
+        });
+        QObject::connect(targetVertsSpin, QOverload<int>::of(&QSpinBox::valueChanged), &owner, [this](int) {
+            emit owner.optionsChanged();
+        });
+        optLayout->addRow(owner.tr("Decimate Geometry:"), decimateRow);
 
         layout->addWidget(optCard);
 
@@ -317,7 +349,7 @@ struct GlbOptionsWidget::Impl {
     }
 
     void reset() {
-        coordSwitch->setChecked(true);
+        coordSwitch->setChecked(false);
         scaleModeCombo->setCurrentIndex(0);
         scaleFactorSpin->setValue(1.0);
         scaleFactorSpin->setEnabled(true);
@@ -330,6 +362,11 @@ struct GlbOptionsWidget::Impl {
         lastAnalyzedMaxVerts = 0;
         lastAnalyzedExceeded = false;
         updateOptimizerStatusText();
+        if (decimateSwitch) decimateSwitch->setChecked(false);
+        if (targetVertsSpin) {
+            targetVertsSpin->setValue(30000);
+            targetVertsSpin->setEnabled(false);
+        }
         animSectionWidget->setVisible(true);
         bottomStretch->setVisible(false);
         rebuildTree();
@@ -378,6 +415,14 @@ bool GlbOptionsWidget::autoSplit16Bit() const {
 
 bool GlbOptionsWidget::isMeshOptimizerEnabled() const {
     return _impl->autoSplit16BitSwitch->isChecked();
+}
+
+bool GlbOptionsWidget::decimateEnabled() const {
+    return _impl->decimateSwitch ? _impl->decimateSwitch->isChecked() : false;
+}
+
+uint32_t GlbOptionsWidget::targetMaxVertices() const {
+    return _impl->targetVertsSpin ? static_cast<uint32_t>(_impl->targetVertsSpin->value()) : 30000;
 }
 
 void GlbOptionsWidget::setMeshOptimizerEnabled(bool enabled) {

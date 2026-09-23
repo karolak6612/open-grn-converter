@@ -22,6 +22,8 @@ public:
     bool splitAnimations() const;
     bool autoSplit16Bit() const;
     bool isMeshOptimizerEnabled() const;
+    bool decimateEnabled() const;
+    uint32_t targetMaxVertices() const;
 
     void setSplitAnimations(bool split);
     void setMeshOptimizerEnabled(bool enabled);

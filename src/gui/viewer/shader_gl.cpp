@@ -107,23 +107,23 @@ float grid_line(vec2 p, float scale) {
 }
 
 void main() {
-    vec2 p = v_world.xy;
+    vec2 p = v_world.xz;
     float minor = grid_line(p, cell) * 0.30;
     float major = grid_line(p, cell * 5.0) * 0.55;
     float lines = max(minor, major);
 
-    float wx = 1.0 - min(abs(v_world.y) / (fwidth(v_world.y) * 1.5 + 1e-6), 1.0);
-    float wy = 1.0 - min(abs(v_world.x) / (fwidth(v_world.x) * 1.5 + 1e-6), 1.0);
+    float wx = 1.0 - min(abs(v_world.z) / (fwidth(v_world.z) * 1.5 + 1e-6), 1.0);
+    float wz = 1.0 - min(abs(v_world.x) / (fwidth(v_world.x) * 1.5 + 1e-6), 1.0);
 
     vec3 rgb = vec3(0.40, 0.44, 0.50);
     rgb = mix(rgb, vec3(0.85, 0.35, 0.32), wx);
-    rgb = mix(rgb, vec3(0.40, 0.80, 0.45), wy);
+    rgb = mix(rgb, vec3(0.40, 0.80, 0.45), wz);
 
     float dist = distance(v_world, cam_pos);
     float fade = exp(-dist / max(cell * 150.0, 1.0));
     fade *= fade;
 
-    float alpha = max(lines, max(wx, wy) * 0.8) * fade;
+    float alpha = max(lines, max(wx, wz) * 0.8) * fade;
     if (alpha < 0.004) discard;
     f_color = vec4(rgb, alpha);
 }

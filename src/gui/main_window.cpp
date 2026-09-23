@@ -300,6 +300,7 @@ struct MainWindow::Impl {
         grnOptions = new GrnOptionsWidget(optionsStack);
         QObject::connect(grnOptions, &GrnOptionsWidget::optionsChanged, &owner, [this]() {
             updateViewerScale();
+            if (targetInfoWidget) targetInfoWidget->markOutdated(true);
         });
         QObject::connect(grnOptions, &GrnOptionsWidget::animFilesChanged, &owner, [this]() {
             updateBadges();
@@ -312,6 +313,7 @@ struct MainWindow::Impl {
         glbOptions = new GlbOptionsWidget(optionsStack);
         QObject::connect(glbOptions, &GlbOptionsWidget::optionsChanged, &owner, [this]() {
             updateViewerScale();
+            if (targetInfoWidget) targetInfoWidget->markOutdated(true);
         });
         QObject::connect(glbOptions, &GlbOptionsWidget::animationSelected, &owner, [this](int animIndex) {
             onGlbAnimationSelected(animIndex);
@@ -525,7 +527,7 @@ struct MainWindow::Impl {
                     loadedModel = parse_grn_file(fi.filesystemFilePath());
                 } else if (ext == "glb" || ext == "gltf") {
                     GlbImportOptions opt;
-                    opt.y_up = true;
+                    opt.y_up = glbOptions ? glbOptions->convertCoordinates() : false;
                     opt.texture_dir = fi.dir().filesystemAbsolutePath();
                     loadedModel = load_glb_file(fi.filesystemFilePath(), opt);
                 }
@@ -726,9 +728,9 @@ struct MainWindow::Impl {
                 }
             }
         } else if (!clipPath.isEmpty()) {
-            auto clipModel = parse_grn_file(std::filesystem::path(clipPath.toStdWString()));
-            if (clipModel && !clipModel->animations.empty()) {
-                const auto& a = clipModel->animations[0];
+            cachedExternalAnimModel = parse_grn_file(std::filesystem::path(clipPath.toStdWString()));
+            if (cachedExternalAnimModel && !cachedExternalAnimModel->animations.empty()) {
+                const auto& a = cachedExternalAnimModel->animations[0];
                 modelViewer->playTargetAnimation(&a, QFileInfo(clipPath).fileName());
 
                 if (loadedModel && !loadedModel->animations.empty()) {
@@ -852,6 +854,10 @@ struct MainWindow::Impl {
             opts.vtex_enabled = glbOptions->compressVTex();
             opts.split_animations = glbOptions->splitAnimations();
             opts.auto_split_16bit = glbOptions->autoSplit16Bit();
+            opts.optimize_vertices = glbOptions->decimateEnabled();
+            if (opts.optimize_vertices) {
+                opts.max_vertices_16bit = glbOptions->targetMaxVertices();
+            }
         }
 
         progressBar->setValue(0);
@@ -883,7 +889,7 @@ struct MainWindow::Impl {
                 bool isGrnToGlb = (navBar->currentIndex() == 0);
                 if (isGrnToGlb) {
                     GlbImportOptions imp_opt;
-                    imp_opt.y_up = true;
+                    imp_opt.y_up = grnOptions ? grnOptions->convertCoordinates() : false;
                     imp_opt.texture_dir = fi.dir().filesystemAbsolutePath();
                     convertedModel = load_glb_file(fi.filesystemFilePath(), imp_opt);
                 } else {

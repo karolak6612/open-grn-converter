@@ -190,6 +190,29 @@ std::optional<GrnModel> load_glb_memory(const uint8_t* data, size_t size, const 
             }
         }
 
+        // Validate cached raw_blob against decoded image dimensions if present in extras
+        if (!tex.raw_blob.empty()) {
+            bool valid_blob = false;
+            if (tex.format_code == 4 || tex.format_code == 5) {
+                auto vhdr = parse_vtex_header(reinterpret_cast<const uint8_t*>(tex.raw_blob.data()), tex.raw_blob.size());
+                if (vhdr && vhdr->width == tex.width && vhdr->height == tex.height) {
+                    valid_blob = true;
+                }
+            } else if (tex.format_code == 8) {
+                size_t expected_blocks = ((tex.width + 3) / 4) * ((tex.height + 3) / 4);
+                if (tex.raw_blob.size() == expected_blocks * 8) {
+                    valid_blob = true;
+                }
+            } else if (tex.format_code == 0 || tex.format_code == 1) {
+                if (tex.raw_blob.size() == static_cast<size_t>(tex.width) * tex.height * 4) {
+                    valid_blob = true;
+                }
+            }
+            if (!valid_blob) {
+                tex.raw_blob.clear();
+            }
+        }
+
         if (tex.raw_blob.empty() && !tex.decoded_rgba.empty()) {
             tex.format_code = tex.has_alpha ? 1 : 0;
         }
@@ -508,8 +531,9 @@ std::optional<GrnModel> load_glb_memory(const uint8_t* data, size_t size, const 
                         if (w > 1e-4f) {
                             int32_t jid = static_cast<int32_t>(j_ids[k]);
                             int32_t skel_b = jid;
-                            if (inst.node && inst.node->skin && jid >= 0 && static_cast<size_t>(jid) < inst.node->skin->joints_count) {
-                                const auto* jn = inst.node->skin->joints[jid];
+                            const cgltf_skin* target_skin = (inst.node && inst.node->skin) ? inst.node->skin : (gltf->skins_count > 0 ? &gltf->skins[0] : nullptr);
+                            if (target_skin && jid >= 0 && static_cast<size_t>(jid) < target_skin->joints_count) {
+                                const auto* jn = target_skin->joints[jid];
                                 if (node_to_joint.count(jn)) {
                                     skel_b = node_to_joint[jn];
                                 }
@@ -591,26 +615,47 @@ std::optional<GrnModel> load_glb_memory(const uint8_t* data, size_t size, const 
 
         // Reconstruct bone palette and remap weights to local indices
         if (!mesh.weights.empty()) {
-            std::string mesh_extras = get_extras_json(gltf, mesh_src->extras);
-            if (!mesh_extras.empty()) {
-                try {
-                    json extras = json::parse(mesh_extras);
-                    if (extras.contains("grn_bone_index_map")) {
-                        mesh.bone_index_map = extras["grn_bone_index_map"].get<std::vector<int32_t>>();
-                    }
-                } catch (...) {}
-            }
-
-            if (mesh.bone_index_map.empty()) {
-                std::vector<int32_t> used_b;
-                for (const auto& vw : mesh.weights) {
-                    for (int32_t b : vw.bone_indices) {
+            std::vector<int32_t> used_b;
+            for (const auto& vw : mesh.weights) {
+                for (size_t wi = 0; wi < vw.bone_indices.size(); ++wi) {
+                    if (wi < vw.bone_weights.size() && vw.bone_weights[wi] > 1e-4f) {
+                        int32_t b = vw.bone_indices[wi];
                         if (std::find(used_b.begin(), used_b.end(), b) == used_b.end()) {
                             used_b.push_back(b);
                         }
                     }
                 }
-                std::sort(used_b.begin(), used_b.end());
+            }
+            std::sort(used_b.begin(), used_b.end());
+
+            std::vector<int32_t> candidate_map;
+            std::string mesh_extras = get_extras_json(gltf, mesh_src->extras);
+            if (!mesh_extras.empty()) {
+                try {
+                    json extras = json::parse(mesh_extras);
+                    if (extras.contains("grn_bone_index_map")) {
+                        candidate_map = extras["grn_bone_index_map"].get<std::vector<int32_t>>();
+                    }
+                } catch (...) {}
+            }
+
+            // Only trust candidate_map if it actually covers ALL used joints in this mesh!
+            // If any joints (e.g. rotor bones 68..80) are missing from candidate_map,
+            // candidate_map is stale or incomplete and used_b must be used instead.
+            bool covers_all = !candidate_map.empty();
+            if (covers_all) {
+                std::unordered_set<int32_t> cand_set(candidate_map.begin(), candidate_map.end());
+                for (int32_t b : used_b) {
+                    if (cand_set.find(b) == cand_set.end()) {
+                        covers_all = false;
+                        break;
+                    }
+                }
+            }
+
+            if (covers_all) {
+                mesh.bone_index_map = std::move(candidate_map);
+            } else {
                 mesh.bone_index_map = std::move(used_b);
             }
 
@@ -846,14 +891,15 @@ std::optional<GrnModel> load_glb_memory(const uint8_t* data, size_t size, const 
     }
 
     if (options.target_height > 0.0f) {
-        float min_z = 1e30f, max_z = -1e30f;
+        float min_h = 1e30f, max_h = -1e30f;
         for (const auto& m : model.meshes) {
             for (const auto& v : m.vertices) {
-                min_z = std::min(min_z, v.z);
-                max_z = std::max(max_z, v.z);
+                float h_val = options.y_up ? v.z : v.y;
+                min_h = std::min(min_h, h_val);
+                max_h = std::max(max_h, h_val);
             }
         }
-        float cur_h = max_z - min_z;
+        float cur_h = max_h - min_h;
         if (cur_h > 1e-4f) {
             float auto_s = options.target_height / cur_h;
             for (auto& m : model.meshes) {

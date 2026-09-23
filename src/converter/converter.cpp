@@ -285,7 +285,14 @@ bool convert_file(const std::filesystem::path& input,
             }
         }
 
-        bool split_anims = options.split_animations && !model->animations.empty();
+        bool has_real_anims = false;
+        for (const auto& a : model->animations) {
+            if (!a.tracks.empty()) {
+                has_real_anims = true;
+                break;
+            }
+        }
+        bool split_anims = options.split_animations && has_real_anims;
 
         if (split_anims) {
             // Write base model without animations

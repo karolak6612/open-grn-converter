@@ -128,7 +128,7 @@ struct TargetInfoWidget::Impl {
         treeWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
         treeLayout->addWidget(treeWidget);
 
-        QObject::connect(treeWidget, &QTreeWidget::currentItemChanged, &owner, [this](QTreeWidgetItem* current, QTreeWidgetItem*) {
+        auto emitAnim = [this](QTreeWidgetItem* current) {
             if (!current) {
                 emit owner.animationSelected(-1, QString());
                 return;
@@ -136,6 +136,13 @@ struct TargetInfoWidget::Impl {
             int animIdx = current->data(0, Qt::UserRole).toInt();
             QString clipPath = current->data(0, Qt::UserRole + 1).toString();
             emit owner.animationSelected(animIdx, clipPath);
+        };
+
+        QObject::connect(treeWidget, &QTreeWidget::currentItemChanged, &owner, [emitAnim](QTreeWidgetItem* current, QTreeWidgetItem*) {
+            emitAnim(current);
+        });
+        QObject::connect(treeWidget, &QTreeWidget::itemClicked, &owner, [emitAnim](QTreeWidgetItem* current, int) {
+            emitAnim(current);
         });
 
         layout->addWidget(treeCard, 1);
@@ -255,7 +262,7 @@ void TargetInfoWidget::setTargetModel(const GrnModel* model, const QString& outp
     if (!isGlb && fi.exists()) {
         QString base = fi.completeBaseName();
         QDir dir = fi.dir();
-        QStringList splitFiles = dir.entryList({ base + "_*.grn" }, QDir::Files, QDir::Name);
+        QStringList splitFiles = dir.entryList({ base + "_*.grn", base + "-*.grn" }, QDir::Files, QDir::Name);
         for (const QString& sf : splitFiles) {
             hasAnims = true;
             auto* animItem = new QTreeWidgetItem(rootItem);
@@ -270,6 +277,12 @@ void TargetInfoWidget::setTargetModel(const GrnModel* model, const QString& outp
         auto* infoItem = new QTreeWidgetItem(rootItem);
         infoItem->setText(0, tr("(No embedded animation clips)"));
         infoItem->setFlags(Qt::NoItemFlags);
+    } else if (rootItem->childCount() > 0) {
+        auto* firstChild = rootItem->child(0);
+        int role = firstChild->data(0, Qt::UserRole).toInt();
+        if (role >= 0 || role == -2) {
+            _impl->treeWidget->setCurrentItem(firstChild);
+        }
     }
 }
 
@@ -304,6 +317,36 @@ void TargetInfoWidget::selectAnimationItem(int index) {
     if (!root) return;
     if (index >= 0 && index < root->childCount()) {
         _impl->treeWidget->setCurrentItem(root->child(index));
+    }
+}
+
+void TargetInfoWidget::markOutdated(bool outdated) {
+    if (!_impl->currentOutputPath.isEmpty()) {
+        if (outdated) {
+            _impl->statusBadge->setText(tr("Outdated"));
+            _impl->statusBadge->setStyleSheet(
+                "QLabel {"
+                "  background: rgba(255, 193, 7, 0.2);"
+                "  color: #c67d00;"
+                "  border-radius: 4px;"
+                "  padding: 2px 6px;"
+                "  font-size: 11px;"
+                "  font-weight: bold;"
+                "}"
+            );
+        } else {
+            _impl->statusBadge->setText(tr("Ready ✓"));
+            _impl->statusBadge->setStyleSheet(
+                "QLabel {"
+                "  background: rgba(40, 167, 69, 0.15);"
+                "  color: #28a745;"
+                "  border-radius: 4px;"
+                "  padding: 2px 6px;"
+                "  font-size: 11px;"
+                "  font-weight: bold;"
+                "}"
+            );
+        }
     }
 }
 

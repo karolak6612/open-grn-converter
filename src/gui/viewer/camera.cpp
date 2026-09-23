@@ -11,13 +11,13 @@ void OrbitCamera::frameBounds(const QVector3D& minXYZ, const QVector3D& maxXYZ) 
 QVector3D OrbitCamera::eye() const {
     float cp = std::cos(pitch), sp = std::sin(pitch);
     float cy = std::cos(yaw), sy = std::sin(yaw);
-    QVector3D offset(cp * sy, cp * cy, sp);
+    QVector3D offset(cp * sy, sp, cp * cy);
     return target + offset * distance;
 }
 
 QMatrix4x4 OrbitCamera::view() const {
     QMatrix4x4 v;
-    v.lookAt(eye(), target, QVector3D(0.0f, 0.0f, 1.0f));
+    v.lookAt(eye(), target, QVector3D(0.0f, 1.0f, 0.0f));
     return v;
 }
 
@@ -36,7 +36,7 @@ void OrbitCamera::orbit(float deltaX, float deltaY) {
 
 void OrbitCamera::pan(float deltaX, float deltaY) {
     QVector3D fwd = (target - eye()).normalized();
-    QVector3D right = QVector3D::crossProduct(fwd, QVector3D(0.0f, 0.0f, 1.0f)).normalized();
+    QVector3D right = QVector3D::crossProduct(fwd, QVector3D(0.0f, 1.0f, 0.0f)).normalized();
     QVector3D up = QVector3D::crossProduct(right, fwd).normalized();
     float panScale = distance * 0.0015f;
     target += -right * (deltaX * panScale) + up * (deltaY * panScale);

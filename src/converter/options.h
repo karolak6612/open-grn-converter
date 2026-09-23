@@ -29,7 +29,7 @@ struct ConversionOptions {
     std::string texture_format = "tga"; /**< Target format for standalone textures: "tga", "png", or "vtex". */
     bool vtex_enabled = true;         /**< Enable VTex video texture encoding/decoding. */
     bool tint_pink = false;           /**< Test feature: applies pink tint filter to diffuse textures. */
-    bool y_up = true;                 /**< Convert coordinate systems between Z-up (GRN) and Y-up (glTF). */
+    bool y_up = false;                /**< Swizzle coordinate systems between Z-up (GRN) and Y-up (glTF). */
     float scale = 1.0f;               /**< Uniform scale factor applied during conversion. */
     float target_height = 0.0f;       /**< Optional target height in game units (auto-calculates scale). */
     std::filesystem::path anim_file;  /**< Optional path to external animation track to combine with model (backwards compat). */
