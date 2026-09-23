@@ -320,7 +320,8 @@ bool decimate_mesh(GrnMesh& mesh, float target_ratio, uint32_t target_max_verts)
         }
 
         std::vector<uint32_t> dest(orig_idx_count);
-        float target_error = 0.05f;
+        float target_error = 0.15f;
+        float result_error = 0.0f;
         size_t new_idx_count = meshopt_simplify(
             dest.data(),
             indices.data(),
@@ -331,8 +332,26 @@ bool decimate_mesh(GrnMesh& mesh, float target_ratio, uint32_t target_max_verts)
             target_idx_count,
             target_error,
             0,
-            nullptr
+            &result_error
         );
+
+        if (new_idx_count > target_idx_count * 1.15f) {
+            float sloppy_error = 0.0f;
+            size_t sloppy_count = meshopt_simplifySloppy(
+                dest.data(),
+                indices.data(),
+                orig_idx_count,
+                reinterpret_cast<const float*>(mesh.vertices.data()),
+                mesh.vertices.size(),
+                sizeof(Vec3),
+                target_idx_count,
+                0.15f,
+                &sloppy_error
+            );
+            if (sloppy_count > 0 && sloppy_count < new_idx_count) {
+                new_idx_count = sloppy_count;
+            }
+        }
 
         if (new_idx_count > 0 && new_idx_count < orig_idx_count) {
             dest.resize(new_idx_count);

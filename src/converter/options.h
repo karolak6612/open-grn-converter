@@ -39,6 +39,7 @@ struct ConversionOptions {
     std::filesystem::path output_path;/**< Optional explicit output path or directory. */
     bool auto_split_16bit = true;     /**< Automatically partition meshes with >64k vertices into 16-bit safe sub-meshes. */
     bool optimize_vertices = false;   /**< Apply quadric error decimation to reduce polygon count. */
+    uint32_t decimate_target_verts = 30000; /**< Target vertex budget when decimation is enabled. */
     uint32_t max_vertices_16bit = 64000; /**< Maximum vertex threshold per sub-mesh (default 64000). */
 };
 

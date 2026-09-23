@@ -855,9 +855,8 @@ struct MainWindow::Impl {
             opts.split_animations = glbOptions->splitAnimations();
             opts.auto_split_16bit = glbOptions->autoSplit16Bit();
             opts.optimize_vertices = glbOptions->decimateEnabled();
-            if (opts.optimize_vertices) {
-                opts.max_vertices_16bit = glbOptions->targetMaxVertices();
-            }
+            opts.decimate_target_verts = glbOptions->targetMaxVertices();
+            opts.max_vertices_16bit = 64000;
         }
 
         progressBar->setValue(0);

@@ -266,7 +266,7 @@ bool convert_file(const std::filesystem::path& input,
         opt_opts.auto_split_16bit = options.auto_split_16bit;
         opt_opts.max_vertices_per_part = options.max_vertices_16bit;
         opt_opts.decimate = options.optimize_vertices;
-        opt_opts.max_total_vertices = options.max_vertices_16bit;
+        opt_opts.max_total_vertices = options.decimate_target_verts;
 
         size_t orig_mesh_count = model->meshes.size();
         optimize_model_meshes(*model, opt_opts);

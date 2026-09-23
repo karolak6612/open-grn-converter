@@ -7,6 +7,9 @@
 #include "../src/core/grn_writer.h"
 #include "../src/core/grn_parser.h"
 #include "../src/gltf/glb_writer.h"
+#include "../src/gltf/glb_reader.h"
+#include <meshoptimizer.h>
+#include <filesystem>
 
 #include <iostream>
 #include <cassert>
@@ -200,11 +203,32 @@ static void test_multi_material_tri_groups_split() {
               << "Part 1 has " << parts[1].tri_groups.size() << " groups (" << parts[1].vertices.size() << " verts).\n";
 }
 
+static void test_centi_decimation() {
+    if (!std::filesystem::exists("test_data/centi.glb")) return;
+    std::cout << "[TEST] Centi GLB Decimation..." << std::endl;
+    grn::GlbImportOptions imp;
+    auto model = grn::load_glb_file("test_data/centi.glb", imp);
+    assert(model.has_value());
+    assert(model->meshes.size() == 1);
+    std::cout << "  Original centi: " << model->meshes[0].vertices.size() << " verts, "
+              << model->meshes[0].faces.size() << " tris\n";
+
+    grn::GrnMesh mesh_copy = model->meshes[0];
+    bool decimated = grn::decimate_mesh(mesh_copy, 0.3f, 30000);
+    assert(decimated);
+    (void)decimated;
+    std::cout << "  Decimated centi: " << mesh_copy.vertices.size() << " verts, "
+              << mesh_copy.faces.size() << " tris\n";
+    assert(mesh_copy.vertices.size() <= 35000);
+    assert(mesh_copy.faces.size() <= 12000);
+}
+
 int main() {
     try {
         test_split_97k_mesh();
         test_model_optimizer_roundtrip();
         test_multi_material_tri_groups_split();
+        test_centi_decimation();
         std::cout << "\n[PASS] All mesh optimizer tests passed successfully!\n";
         return 0;
     } catch (const std::exception& ex) {
