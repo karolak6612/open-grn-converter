@@ -78,8 +78,8 @@ struct GlbOptionsWidget::Impl {
         optLayout->setHorizontalSpacing(6);
 
         coordSwitch = new oclero::qlementine::Switch(optCard);
-        coordSwitch->setChecked(false);
-        coordSwitch->setToolTip(owner.tr("Swizzle coordinates between Y-up and Z-up (leave OFF for Sacred Gold and standard glTF models)"));
+        coordSwitch->setChecked(true);
+        coordSwitch->setToolTip(owner.tr("Convert glTF standard Y-up coordinates to Granny native Z-up (recommended for Sacred Gold and Granny engines)"));
         QObject::connect(coordSwitch, &oclero::qlementine::Switch::clicked, &owner, [this]() {
             emit owner.optionsChanged();
         });
@@ -140,7 +140,7 @@ struct GlbOptionsWidget::Impl {
         optLayout->addRow(owner.tr("Split Animations:"), splitAnimsSwitch);
 
         animOptimizerSwitch = new oclero::qlementine::Switch(optCard);
-        animOptimizerSwitch->setChecked(true);
+        animOptimizerSwitch->setChecked(false);
         animOptimizerSwitch->setToolTip(owner.tr("Prune static rest-pose bone tracks and redundant keyframes to prevent 32-bit memory exhaustion and crashes in Granny viewers and engine"));
         QObject::connect(animOptimizerSwitch, &oclero::qlementine::Switch::clicked, &owner, [this]() {
             updateAnimControlsState();
@@ -197,7 +197,7 @@ struct GlbOptionsWidget::Impl {
         optLayout->addRow(owner.tr("Micro-Bone Culling:"), animCullCombo);
 
         animLoopSafeSwitch = new oclero::qlementine::Switch(optCard);
-        animLoopSafeSwitch->setChecked(true);
+        animLoopSafeSwitch->setChecked(false);
         animLoopSafeSwitch->setToolTip(owner.tr("Enforce exact matching start and end keyframes to eliminate animation loop seam popping"));
         QObject::connect(animLoopSafeSwitch, &oclero::qlementine::Switch::clicked, &owner, [this]() {
             emit owner.optionsChanged();
@@ -422,7 +422,7 @@ struct GlbOptionsWidget::Impl {
     }
 
     void reset() {
-        coordSwitch->setChecked(false);
+        coordSwitch->setChecked(true);
         scaleModeCombo->setCurrentIndex(0);
         scaleFactorSpin->setValue(1.0);
         scaleFactorSpin->setEnabled(true);
@@ -430,14 +430,14 @@ struct GlbOptionsWidget::Impl {
         targetHeightSpin->setEnabled(false);
         vtexCompressSwitch->setChecked(true);
         splitAnimsSwitch->setChecked(true);
-        if (animOptimizerSwitch) animOptimizerSwitch->setChecked(true);
+        if (animOptimizerSwitch) animOptimizerSwitch->setChecked(false);
         if (animFpsCombo) animFpsCombo->setCurrentIndex(0);
         if (animCustomFpsSpin) {
             animCustomFpsSpin->setValue(30.0);
             animCustomFpsSpin->setEnabled(false);
         }
         if (animCullCombo) animCullCombo->setCurrentIndex(0);
-        if (animLoopSafeSwitch) animLoopSafeSwitch->setChecked(true);
+        if (animLoopSafeSwitch) animLoopSafeSwitch->setChecked(false);
         if (animStatusLabel) {
             animStatusLabel->setText(owner.tr("(Auto-detected on load)"));
             animStatusLabel->setStyleSheet("font-size: 11px; color: #888888;");
@@ -468,6 +468,13 @@ void GlbOptionsWidget::setModel(const QString& modelPath) {
 
 bool GlbOptionsWidget::convertCoordinates() const {
     return _impl->coordSwitch->isChecked();
+}
+
+void GlbOptionsWidget::setConvertCoordinates(bool convert) {
+    if (_impl->coordSwitch && _impl->coordSwitch->isChecked() != convert) {
+        _impl->coordSwitch->setChecked(convert);
+        emit optionsChanged();
+    }
 }
 
 bool GlbOptionsWidget::isTargetHeightMode() const {
@@ -523,7 +530,7 @@ float GlbOptionsWidget::animMinRotationDeg() const {
 
 bool GlbOptionsWidget::animLoopSafe() const {
     if (!_impl->animOptimizerSwitch || !_impl->animOptimizerSwitch->isChecked()) return false;
-    return _impl->animLoopSafeSwitch ? _impl->animLoopSafeSwitch->isChecked() : true;
+    return _impl->animLoopSafeSwitch ? _impl->animLoopSafeSwitch->isChecked() : false;
 }
 
 void GlbOptionsWidget::setAnimTargetFps(float fps) {
@@ -574,7 +581,7 @@ void GlbOptionsWidget::setMeshOptimizerEnabled(bool enabled) {
 }
 
 bool GlbOptionsWidget::isAnimOptimizerEnabled() const {
-    return _impl->animOptimizerSwitch ? _impl->animOptimizerSwitch->isChecked() : true;
+    return _impl->animOptimizerSwitch ? _impl->animOptimizerSwitch->isChecked() : false;
 }
 
 void GlbOptionsWidget::setAnimOptimizerEnabled(bool enabled) {

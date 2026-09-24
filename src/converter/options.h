@@ -29,7 +29,7 @@ struct ConversionOptions {
     std::string texture_format = "tga"; /**< Target format for standalone textures: "tga", "png", or "vtex". */
     bool vtex_enabled = true;         /**< Enable VTex video texture encoding/decoding. */
     bool tint_pink = false;           /**< Test feature: applies pink tint filter to diffuse textures. */
-    bool y_up = false;                /**< Swizzle coordinate systems between Z-up (GRN) and Y-up (glTF). */
+    bool y_up = true;                 /**< Swizzle coordinate systems between Z-up (GRN) and Y-up (glTF) (default true: glTF standard). */
     float scale = 1.0f;               /**< Uniform scale factor applied during conversion. */
     float target_height = 0.0f;       /**< Optional target height in game units (auto-calculates scale). */
     std::filesystem::path anim_file;  /**< Optional path to external animation track to combine with model (backwards compat). */
@@ -41,8 +41,8 @@ struct ConversionOptions {
     bool optimize_vertices = false;   /**< Apply quadric error decimation to reduce polygon count. */
     uint32_t decimate_target_verts = 30000; /**< Target vertex budget when decimation is enabled. */
     uint32_t max_vertices_16bit = 64000; /**< Maximum vertex threshold per sub-mesh (default 64000). */
-    bool optimize_animations = true;  /**< Optimize animations to prevent memory exhaustion in viewers/engine. */
-    bool loop_safe_animations = true; /**< Preserve loop boundary keyframes and tangents. */
+    bool optimize_animations = false; /**< Optimize animations to prevent memory exhaustion in viewers/engine (disabled by default). */
+    bool loop_safe_animations = false;/**< Preserve loop boundary keyframes and tangents (disabled by default). */
     bool prune_static_tracks = true;  /**< Strip animation tracks that match bone rest pose. */
     bool collapse_constant_keyframes = true; /**< Collapse constant keyframe sequences down to 1 keyframe. */
     bool decimate_keyframes = false;  /**< Decimate redundant linear keyframes (disabled by default to prevent FK chain distortion). */

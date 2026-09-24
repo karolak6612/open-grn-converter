@@ -285,4 +285,3 @@ target_link_libraries(test_viewer_engine
         Qt6::Gui
 )
 add_test(NAME test_viewer_engine COMMAND test_viewer_engine)
-

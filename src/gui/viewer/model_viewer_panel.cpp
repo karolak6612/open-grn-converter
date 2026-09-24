@@ -332,16 +332,18 @@ ModelViewerPanel::ModelViewerPanel(QWidget* parent)
 
 ModelViewerPanel::~ModelViewerPanel() = default;
 
-void ModelViewerPanel::loadSourceModel(const GrnModel* model, const QString& title) {
+void ModelViewerPanel::loadSourceModel(const GrnModel* model, const QString& title, bool isZUp) {
     _impl->currentSourceTitle = title;
+    _impl->sourceViewport->setZUpMode(isZUp);
     _impl->sourceViewport->loadModel(model);
     if (!model) {
         _impl->sourceBadge->setText(tr("Source: No model loaded"));
     }
 }
 
-void ModelViewerPanel::loadTargetModel(const GrnModel* model, const QString& title) {
+void ModelViewerPanel::loadTargetModel(const GrnModel* model, const QString& title, bool isZUp) {
     _impl->currentTargetTitle = title;
+    _impl->targetViewport->setZUpMode(isZUp);
     _impl->targetViewport->loadModel(model);
     if (!model) {
         _impl->targetBadge->setText(tr("Target: Waiting for conversion"));

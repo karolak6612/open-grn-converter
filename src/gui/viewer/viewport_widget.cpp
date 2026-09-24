@@ -362,6 +362,23 @@ void ViewportWidget::setModelScale(float s) {
     update();
 }
 
+void ViewportWidget::setZUpMode(bool enabled) {
+    if (z_up_mode_ != enabled) {
+        z_up_mode_ = enabled;
+        frameBounds();
+        update();
+    }
+}
+
+QMatrix4x4 ViewportWidget::modelMatrix() const {
+    QMatrix4x4 m;
+    if (z_up_mode_) {
+        // Rotate -90 degrees around X axis to convert Granny Z-up coordinates to OpenGL Y-up
+        m.rotate(-90.0f, 1.0f, 0.0f, 0.0f);
+    }
+    return m;
+}
+
 void ViewportWidget::syncCamera(const OrbitCamera& cam) {
     camera_.target = cam.target;
     camera_.yaw = cam.yaw;
@@ -373,6 +390,28 @@ void ViewportWidget::syncCamera(const OrbitCamera& cam) {
 void ViewportWidget::frameBounds() {
     QVector3D minXYZ, maxXYZ;
     skinning_.computeBounds(minXYZ, maxXYZ);
+    if (z_up_mode_) {
+        QMatrix4x4 mm = modelMatrix();
+        QVector3D pts[8] = {
+            mm.map(QVector3D(minXYZ.x(), minXYZ.y(), minXYZ.z())),
+            mm.map(QVector3D(maxXYZ.x(), minXYZ.y(), minXYZ.z())),
+            mm.map(QVector3D(minXYZ.x(), maxXYZ.y(), minXYZ.z())),
+            mm.map(QVector3D(maxXYZ.x(), maxXYZ.y(), minXYZ.z())),
+            mm.map(QVector3D(minXYZ.x(), minXYZ.y(), maxXYZ.z())),
+            mm.map(QVector3D(maxXYZ.x(), minXYZ.y(), maxXYZ.z())),
+            mm.map(QVector3D(minXYZ.x(), maxXYZ.y(), maxXYZ.z())),
+            mm.map(QVector3D(maxXYZ.x(), maxXYZ.y(), maxXYZ.z()))
+        };
+        minXYZ = maxXYZ = pts[0];
+        for (int i = 1; i < 8; ++i) {
+            minXYZ.setX(std::min(minXYZ.x(), pts[i].x()));
+            minXYZ.setY(std::min(minXYZ.y(), pts[i].y()));
+            minXYZ.setZ(std::min(minXYZ.z(), pts[i].z()));
+            maxXYZ.setX(std::max(maxXYZ.x(), pts[i].x()));
+            maxXYZ.setY(std::max(maxXYZ.y(), pts[i].y()));
+            maxXYZ.setZ(std::max(maxXYZ.z(), pts[i].z()));
+        }
+    }
     camera_.frameBounds(minXYZ, maxXYZ);
     emit cameraChanged(camera_);
     update();
@@ -464,11 +503,14 @@ void ViewportWidget::paintGL() {
         meshes_[mi]->updatePositions(this, positions[mi], true);
     }
 
+    QMatrix4x4 modelMat = modelMatrix();
+
     // 3. Render Solid Meshes
     if (mesh_program_ && !meshes_.empty()) {
         glUseProgram(mesh_program_);
         GLint locVP = glGetUniformLocation(mesh_program_, "view_proj");
         GLint locV = glGetUniformLocation(mesh_program_, "view");
+        GLint locM = glGetUniformLocation(mesh_program_, "model");
         GLint locMode = glGetUniformLocation(mesh_program_, "u_mode");
         GLint locHasTex = glGetUniformLocation(mesh_program_, "u_has_texture");
         GLint locLight = glGetUniformLocation(mesh_program_, "light_dir");
@@ -477,6 +519,7 @@ void ViewportWidget::paintGL() {
 
         glUniformMatrix4fv(locVP, 1, GL_FALSE, viewProj.constData());
         glUniformMatrix4fv(locV, 1, GL_FALSE, view.constData());
+        glUniformMatrix4fv(locM, 1, GL_FALSE, modelMat.constData());
         glUniform1i(locMode, static_cast<int>(shading_mode_));
         glUniform3f(locLight, 0.35f, 0.60f, 0.70f);
         glUniform1i(locTex, 0);
@@ -494,8 +537,10 @@ void ViewportWidget::paintGL() {
     if (wireframe_ && wire_program_ && !meshes_.empty()) {
         glUseProgram(wire_program_);
         GLint locWireVP = glGetUniformLocation(wire_program_, "view_proj");
+        GLint locWireM = glGetUniformLocation(wire_program_, "model");
         GLint locWireCol = glGetUniformLocation(wire_program_, "u_color");
         glUniformMatrix4fv(locWireVP, 1, GL_FALSE, viewProj.constData());
+        glUniformMatrix4fv(locWireM, 1, GL_FALSE, modelMat.constData());
         glUniform4f(locWireCol, 0.95f, 0.55f, 0.15f, 0.75f);
 
         glEnable(GL_POLYGON_OFFSET_LINE);
@@ -557,8 +602,10 @@ void ViewportWidget::renderSkeleton(const QMatrix4x4& viewProj) {
 
     glUseProgram(wire_program_);
     GLint locWireVP = glGetUniformLocation(wire_program_, "view_proj");
+    GLint locWireM = glGetUniformLocation(wire_program_, "model");
     GLint locWireCol = glGetUniformLocation(wire_program_, "u_color");
     glUniformMatrix4fv(locWireVP, 1, GL_FALSE, viewProj.constData());
+    glUniformMatrix4fv(locWireM, 1, GL_FALSE, modelMatrix().constData());
 
     glEnable(GL_DEPTH_TEST);
     glDepthFunc(GL_LEQUAL);
@@ -662,7 +709,7 @@ void ViewportWidget::renderBoneLabelsGPU(const QMatrix4x4& viewProj) {
         if (boneIdx >= world.size()) continue;
 
         QVector3D pBone = world[boneIdx].map(QVector3D(0.0f, 0.0f, 0.0f));
-        QVector4D clip = viewProj * QVector4D(pBone, 1.0f);
+        QVector4D clip = viewProj * (modelMatrix() * QVector4D(pBone, 1.0f));
         if (clip.w() <= 0.05f) continue;
 
         float ndcX = clip.x() / clip.w();

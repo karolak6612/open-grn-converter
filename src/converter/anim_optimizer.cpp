@@ -485,14 +485,17 @@ AnimOptimizationStats optimize_animation(GrnAnimation& anim,
     optimizedTracks.reserve(anim.tracks.size());
 
     for (auto& tr : anim.tracks) {
-        // Find corresponding bone
+        // Find corresponding bone: match by name first
         const GrnBone* bone = nullptr;
-        if (tr.channel_id > 0 && static_cast<size_t>(tr.channel_id - 1) < bones.size()) {
-            bone = &bones[tr.channel_id - 1];
-        } else if (!tr.bone_name.empty()) {
+        if (!tr.bone_name.empty()) {
             auto it = boneByName.find(tr.bone_name);
             if (it != boneByName.end()) {
                 bone = it->second;
+            }
+        }
+        if (!bone && tr.channel_id > 0 && static_cast<size_t>(tr.channel_id - 1) < bones.size()) {
+            if (tr.bone_name.empty() || tr.bone_name == ("Bone_" + std::to_string(tr.channel_id))) {
+                bone = &bones[tr.channel_id - 1];
             }
         }
 

@@ -50,6 +50,9 @@ public:
     void resetCamera();
     void setModelScale(float s);
     float modelScale() const { return skinning_.scale(); }
+    void setZUpMode(bool enabled);
+    bool isZUpMode() const { return z_up_mode_; }
+    QMatrix4x4 modelMatrix() const;
 
     const OrbitCamera& camera() const { return camera_; }
     void syncCamera(const OrbitCamera& cam);
@@ -130,6 +133,7 @@ private:
     bool is_orbiting_{ false };
     bool is_panning_{ false };
     QString viewport_label_;
+    bool z_up_mode_{ false };
 
     void setupGridGeometry();
     void renderGrid(const QMatrix4x4& viewProj);

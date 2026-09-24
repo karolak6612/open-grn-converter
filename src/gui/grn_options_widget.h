@@ -29,6 +29,7 @@ public:
     void clearExternalAnims();
     void selectAnimationItem(int index);
 
+    void setConvertCoordinates(bool convert);
     void setEmbedTextures(bool embed);
     void setEmbedAnimations(bool enabled);
     void reset();

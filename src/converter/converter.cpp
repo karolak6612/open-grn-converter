@@ -498,4 +498,84 @@ ConversionResult convert_directory(const std::filesystem::path& input_dir,
     return res;
 }
 
+bool detect_is_z_up(const GrnModel& model) {
+    // 1. Skeletal Bone Spine / Head Analysis
+    if (model.bones.size() >= 2) {
+        int headIdx = -1;
+        int pelvisIdx = -1;
+        for (size_t i = 0; i < model.bones.size(); ++i) {
+            std::string lower = model.bones[i].name;
+            std::transform(lower.begin(), lower.end(), lower.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            if (headIdx < 0 && (lower.find("head") != std::string::npos || lower.find("neck") != std::string::npos)) {
+                headIdx = static_cast<int>(i);
+            }
+            if (pelvisIdx < 0 && (lower.find("pelvis") != std::string::npos || lower.find("hips") != std::string::npos || lower.find("root") != std::string::npos)) {
+                pelvisIdx = static_cast<int>(i);
+            }
+        }
+
+        if (headIdx >= 0 && pelvisIdx >= 0 && headIdx != pelvisIdx) {
+            std::vector<Vec3> boneWorld(model.bones.size());
+            for (size_t bi = 0; bi < model.bones.size(); ++bi) {
+                int32_t p = model.bones[bi].parent_index;
+                if (p >= 0 && static_cast<size_t>(p) < bi) {
+                    boneWorld[bi] = {
+                        boneWorld[p].x + model.bones[bi].position.x,
+                        boneWorld[p].y + model.bones[bi].position.y,
+                        boneWorld[p].z + model.bones[bi].position.z
+                    };
+                } else {
+                    boneWorld[bi] = model.bones[bi].position;
+                }
+            }
+            float dy = std::abs(boneWorld[headIdx].y - boneWorld[pelvisIdx].y);
+            float dz = std::abs(boneWorld[headIdx].z - boneWorld[pelvisIdx].z);
+            if (dz > 1.25f * dy && dz > 1.0f) {
+                return true; // Spine is along Z -> Z-up
+            }
+            if (dy > 1.25f * dz && dy > 1.0f) {
+                return false; // Spine is along Y -> Y-up
+            }
+        }
+
+        // Bounding box of bone rest positions
+        float min_by = 1e30f, max_by = -1e30f;
+        float min_bz = 1e30f, max_bz = -1e30f;
+        for (const auto& b : model.bones) {
+            min_by = std::min(min_by, b.position.y); max_by = std::max(max_by, b.position.y);
+            min_bz = std::min(min_bz, b.position.z); max_bz = std::max(max_bz, b.position.z);
+        }
+        float b_span_y = max_by - min_by;
+        float b_span_z = max_bz - min_bz;
+        if (b_span_z > 1.3f * b_span_y && b_span_z > 1.0f) return true;
+        if (b_span_y > 1.3f * b_span_z && b_span_y > 1.0f) return false;
+    }
+
+    // 2. Vertex Bounding Box Analysis
+    float min_y = 1e30f, max_y = -1e30f;
+    float min_z = 1e30f, max_z = -1e30f;
+    size_t total_verts = 0;
+    for (const auto& m : model.meshes) {
+        total_verts += m.vertices.size();
+        for (const auto& v : m.vertices) {
+            min_y = std::min(min_y, v.y); max_y = std::max(max_y, v.y);
+            min_z = std::min(min_z, v.z); max_z = std::max(max_z, v.z);
+        }
+    }
+
+    if (total_verts > 0) {
+        float span_y = max_y - min_y;
+        float span_z = max_z - min_z;
+        if (span_z > 1.25f * span_y && span_z > 0.01f) {
+            return true; // Height along Z -> Z-up
+        }
+        if (span_y > 1.25f * span_z && span_y > 0.01f) {
+            return false; // Height along Y -> Y-up
+        }
+    }
+
+    return true; // Default to Z-up for Granny
+}
+
 } // namespace grn

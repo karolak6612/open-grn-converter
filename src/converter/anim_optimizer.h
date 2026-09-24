@@ -10,7 +10,7 @@ struct AnimOptimizationOptions {
     bool prune_static_tracks = true;         // Omit tracks where keyframes match bone rest pose
     bool collapse_constant_keyframes = true; // Collapse identical keyframe sequences down to 1 keyframe
     bool decimate_keyframes = false;         // Disabled by default: non-uniform chord decimation causes FK chain accumulation & bending distortion!
-    bool loop_safe = true;                   // Lock boundary tangents (t0, t1, tN-1, tN) and snap loop endpoints
+    bool loop_safe = false;                  // Lock boundary tangents (t0, t1, tN-1, tN) and snap loop endpoints (disabled by default)
     float pos_tolerance = 0.002f;            // Position distance tolerance (0.002 game units)
     float rot_tolerance = 0.001f;            // Rotation quaternion dot tolerance (1 - abs(q1.dot(q2)))
     float scale_tolerance = 0.001f;          // Scale/shear matrix element tolerance

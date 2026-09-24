@@ -7,28 +7,24 @@
       "description": "Default configuration assumes VCPKG_ROOT=C:/vcpkg and QT_DIR=C:/Qt/6.11.2/msvc2022_64 fallback",
       "binaryDir": "${sourceDir}/build",
       "environment": {
-        "VCPKG_ROOT": "C:/vcpkg",
-        "QT_DIR": "C:/Qt/6.11.2/msvc2022_64"
+        "VCPKG_ROOT": "C:/vcpkg"
       },
       "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Release",
-        "CMAKE_PREFIX_PATH": "$env{QT_DIR}"
+        "CMAKE_BUILD_TYPE": "Release"
       }
     },
     {
       "name": "debug",
       "displayName": "x64 Debug (MSVC + vcpkg)",
-      "description": "Default configuration assumes VCPKG_ROOT=C:/vcpkg and QT_DIR=C:/Qt/6.11.2/msvc2022_64 fallback",
+      "description": "Default configuration assumes VCPKG_ROOT=C:/vcpkg and QT_DIR fallback",
       "binaryDir": "${sourceDir}/build-debug",
       "environment": {
-        "VCPKG_ROOT": "C:/vcpkg",
-        "QT_DIR": "C:/Qt/6.11.2/msvc2022_64"
+        "VCPKG_ROOT": "C:/vcpkg"
       },
       "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Debug",
-        "CMAKE_PREFIX_PATH": "$env{QT_DIR}"
+        "CMAKE_BUILD_TYPE": "Debug"
       }
     }
   ],

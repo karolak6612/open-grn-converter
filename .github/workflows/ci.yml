@@ -1,4 +1,4 @@
-﻿name: CI Release Build & Test
+name: CI Release Build & Test
 
 on:
   push:
@@ -28,6 +28,16 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Install Qt 6
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.0'
+          host: 'windows'
+          target: 'desktop'
+          arch: 'win64_msvc2022_64'
+          modules: 'qtsvg'
+          cache: true
+
       - name: Restore vcpkg installed tree
         uses: actions/cache@v4
         with:
@@ -47,8 +57,9 @@ jobs:
         shell: pwsh
         env:
           VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+          QT_DIR: ${{ env.QT_ROOT_DIR }}
         run: |
-          cmake --preset release
+          cmake --preset release -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR"
 
       - name: Build Release Executables & Libraries
         shell: pwsh
@@ -63,18 +74,70 @@ jobs:
       - name: Stage Release Package
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Path dist -Force
-          Copy-Item "build/Release/grn_converter.exe" -Destination dist/
-          if (Test-Path "build/Release/glfw3.dll") {
-              Copy-Item "build/Release/glfw3.dll" -Destination dist/
-          }
-          Copy-Item "README.md" -Destination dist/
-          Copy-Item "LICENSE" -Destination dist/
+          $dist = "dist"
+          if (Test-Path $dist) { Remove-Item -Recurse -Force $dist }
+          New-Item -ItemType Directory -Path $dist -Force | Out-Null
           
-          # Create zip bundle for end users (AGENTS.md excluded)
-          Compress-Archive -Path "dist/*" -DestinationPath "open-grn-converter-windows-x64.zip" -Force
-          Move-Item -Path "open-grn-converter-windows-x64.zip" -Destination "dist/" -Force
-          Get-ChildItem dist
+          # 1. Copy the main application executable (exclude all test_*.exe binaries)
+          Copy-Item "build/Release/grn_converter.exe" -Destination "$dist/" -Force
+          
+          # 2. Copy third-party runtime dependencies
+          $runtimeDlls = @("meshoptimizer.dll", "D3Dcompiler_47.dll", "dxcompiler.dll", "dxil.dll")
+          foreach ($dll in $runtimeDlls) {
+              if (Test-Path "build/Release/$dll") {
+                  Copy-Item "build/Release/$dll" -Destination "$dist/" -Force
+              }
+          }
+          
+          # 3. Locate windeployqt.exe and deploy Qt6 libraries and plugins into dist
+          $windeployqt = if (Test-Path "$env:QT_ROOT_DIR/bin/windeployqt.exe") {
+              "$env:QT_ROOT_DIR/bin/windeployqt.exe"
+          } elseif (Get-Command windeployqt -ErrorAction SilentlyContinue) {
+              (Get-Command windeployqt).Source
+          } else {
+              $null
+          }
+          
+          if ($windeployqt) {
+              Write-Host "Running windeployqt: $windeployqt"
+              & $windeployqt --no-compiler-runtime --no-opengl-sw --no-translations "$dist/grn_converter.exe"
+          }
+          
+          # 4. Ensure all Qt6 DLLs and plugin directories are present in dist
+          Get-ChildItem "build/Release" -Filter "Qt6*.dll" -File -ErrorAction SilentlyContinue | ForEach-Object {
+              if (-not (Test-Path "$dist/$($_.Name)")) {
+                  Copy-Item $_.FullName -Destination "$dist/" -Force
+              }
+          }
+          
+          $pluginFolders = @("platforms", "styles", "imageformats", "iconengines", "tls", "generic", "networkinformation")
+          foreach ($folder in $pluginFolders) {
+              if ((Test-Path "build/Release/$folder") -and (-not (Test-Path "$dist/$folder"))) {
+                  Copy-Item "build/Release/$folder" -Destination "$dist/" -Recurse -Force
+              }
+          }
+          
+          # 5. Strictly remove any test binaries, test assets, intermediate or debug files
+          Get-ChildItem -Path $dist -Filter "test_*.exe" -Recurse | Remove-Item -Force
+          Get-ChildItem -Path $dist -Filter "*.pdb" -Recurse | Remove-Item -Force
+          Get-ChildItem -Path $dist -Filter "*.ilk" -Recurse | Remove-Item -Force
+          Get-ChildItem -Path $dist -Filter "*.exp" -Recurse | Remove-Item -Force
+          Get-ChildItem -Path $dist -Filter "*.lib" -Recurse | Remove-Item -Force
+          if (Test-Path "$dist/test_grn") {
+              Remove-Item -Recurse -Force "$dist/test_grn"
+          }
+          
+          # 6. Copy documentation and license
+          Copy-Item "README.md" -Destination "$dist/" -Force
+          Copy-Item "LICENSE" -Destination "$dist/" -Force
+          
+          # 7. Print staged release contents for verification in GitHub Actions logs
+          Write-Host "=== Staged Release Directory Contents ==="
+          Get-ChildItem -Path $dist -Recurse | Select-Object Name, Length, DirectoryName | Format-Table -AutoSize
+          
+          # 8. Create compressed zip archive containing all release files
+          Compress-Archive -Path "$dist/*" -DestinationPath "open-grn-converter-windows-x64.zip" -Force
+          Move-Item -Path "open-grn-converter-windows-x64.zip" -Destination "$dist/" -Force
 
       - name: Upload Workflow Artifact
         uses: actions/upload-artifact@v4
@@ -99,12 +162,14 @@ jobs:
           - **Commit**: `${{ github.sha }}`
           - **Branch**: `${{ github.ref_name }}`
           
-          ### Download:
-          Download **open-grn-converter-windows-x64.zip** below, extract anywhere, and launch **grn_converter.exe** (no console shell spawned).
+          ### Download & Installation:
+          1. Download **open-grn-converter-windows-x64.zip** below.
+          2. Extract the archive anywhere on your system.
+          3. Launch **grn_converter.exe** (packaged with all required Qt 6 runtime libraries and plugins).
           "@ | Out-File -FilePath release_notes.md -Encoding utf8
           
           if (-not $isTag) {
               gh release delete latest --yes --cleanup-tag 2>$null || $true
           }
           
-          gh release create $tag "dist/open-grn-converter-windows-x64.zip" "dist/grn_converter.exe" --title $title --notes-file release_notes.md --latest
+          gh release create $tag "dist/open-grn-converter-windows-x64.zip" --title $title --notes-file release_notes.md --latest

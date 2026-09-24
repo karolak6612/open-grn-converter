@@ -22,9 +22,9 @@ public:
     explicit ModelViewerPanel(QWidget* parent = nullptr);
     ~ModelViewerPanel() override;
 
-    void loadSourceModel(const GrnModel* model, const QString& title = QString());
-    void loadTargetModel(const GrnModel* model, const QString& title = QString());
-    void loadModel(const GrnModel* model, const QString& title = QString()) { loadSourceModel(model, title); }
+    void loadSourceModel(const GrnModel* model, const QString& title = QString(), bool isZUp = false);
+    void loadTargetModel(const GrnModel* model, const QString& title = QString(), bool isZUp = false);
+    void loadModel(const GrnModel* model, const QString& title = QString(), bool isZUp = false) { loadSourceModel(model, title, isZUp); }
 
     void playSourceAnimation(const GrnAnimation* anim, const QString& animTitle = QString());
     void playTargetAnimation(const GrnAnimation* anim, const QString& animTitle = QString());

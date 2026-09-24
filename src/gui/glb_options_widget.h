@@ -27,6 +27,7 @@ public:
     float animMinRotationDeg() const;
     bool animLoopSafe() const;
 
+    void setConvertCoordinates(bool convert);
     void setSplitAnimations(bool split);
     void setMeshOptimizerEnabled(bool enabled);
     void setAnimOptimizerEnabled(bool enabled);

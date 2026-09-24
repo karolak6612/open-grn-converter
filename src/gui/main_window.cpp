@@ -324,6 +324,9 @@ struct MainWindow::Impl {
         grnOptions = new GrnOptionsWidget(optionsStack);
         QObject::connect(grnOptions, &GrnOptionsWidget::optionsChanged, &owner, [this]() {
             updateViewerScale();
+            if (modelViewer && modelViewer->sourceViewport()) {
+                modelViewer->sourceViewport()->setZUpMode(grnOptions->convertCoordinates());
+            }
             if (targetInfoWidget) targetInfoWidget->markOutdated(true);
         });
         QObject::connect(grnOptions, &GrnOptionsWidget::animFilesChanged, &owner, [this]() {
@@ -337,6 +340,9 @@ struct MainWindow::Impl {
         glbOptions = new GlbOptionsWidget(optionsStack);
         QObject::connect(glbOptions, &GlbOptionsWidget::optionsChanged, &owner, [this]() {
             updateViewerScale();
+            if (modelViewer && modelViewer->sourceViewport()) {
+                modelViewer->sourceViewport()->setZUpMode(glbOptions->convertCoordinates());
+            }
             if (targetInfoWidget) targetInfoWidget->markOutdated(true);
         });
         QObject::connect(glbOptions, &GlbOptionsWidget::animationSelected, &owner, [this](int animIndex) {
@@ -574,8 +580,19 @@ struct MainWindow::Impl {
 
         if (loadedModel) {
             QFileInfo fi(path);
-            modelViewer->loadSourceModel(&*loadedModel, fi.fileName());
             bool isGrn = (navBar->currentIndex() == 0);
+            bool isZUp = detect_is_z_up(*loadedModel);
+            bool shouldConvert = isGrn ? isZUp : !isZUp;
+
+            if (isGrn && grnOptions) {
+                grnOptions->setConvertCoordinates(shouldConvert);
+            } else if (!isGrn && glbOptions) {
+                glbOptions->setConvertCoordinates(shouldConvert);
+            }
+
+            bool viewFlip = isGrn ? (grnOptions ? grnOptions->convertCoordinates() : isZUp)
+                                  : (glbOptions ? glbOptions->convertCoordinates() : isZUp);
+            modelViewer->loadSourceModel(&*loadedModel, fi.fileName(), viewFlip);
             if (sourceInfoWidget) {
                 sourceInfoWidget->setSourceModel(&*loadedModel, path, isGrn);
             }
@@ -961,7 +978,8 @@ struct MainWindow::Impl {
                 bool isGrnToGlb = (navBar->currentIndex() == 0);
                 if (isGrnToGlb) {
                     GlbImportOptions imp_opt;
-                    imp_opt.y_up = grnOptions ? grnOptions->convertCoordinates() : false;
+                    // Do not invert coordinates when loading converted GLB; display actual exported coordinates
+                    imp_opt.y_up = false;
                     imp_opt.texture_dir = fi.dir().filesystemAbsolutePath();
                     convertedModel = load_glb_file(fi.filesystemFilePath(), imp_opt);
                 } else {
@@ -969,7 +987,8 @@ struct MainWindow::Impl {
                 }
 
                 if (convertedModel) {
-                    modelViewer->loadTargetModel(&*convertedModel, fi.fileName());
+                    bool targetIsZUp = !isGrnToGlb;
+                    modelViewer->loadTargetModel(&*convertedModel, fi.fileName(), targetIsZUp);
                     targetInfoWidget->setTargetModel(&*convertedModel, lastOutputPath, isGrnToGlb);
                     if (boneInspectorWidget) {
                         boneInspectorWidget->setTargetModel(&*convertedModel);

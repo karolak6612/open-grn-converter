@@ -692,8 +692,8 @@ std::vector<uint8_t> export_grn_to_glb_memory(const GrnModel& model, const GlbEx
                     }
                 }
 
-                // 3. Fallback to channel_id ONLY if track has no specific name or is default "Bone_N"
-                if (node_idx < 0 && (track.bone_name.empty() || track.bone_name.rfind("Bone_", 0) == 0)) {
+                // 3. Fallback to channel_id ONLY if track has no specific name or synthetic "Bone_<channel_id>"
+                if (node_idx < 0 && (track.bone_name.empty() || track.bone_name == ("Bone_" + std::to_string(track.channel_id)))) {
                     if (track.channel_id > 0 && static_cast<size_t>(track.channel_id - 1) < model.bones.size()) {
                         target_bi = static_cast<size_t>(track.channel_id - 1);
                         node_idx = joint_indices[target_bi];

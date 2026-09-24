@@ -15,13 +15,16 @@ layout(location = 1) in vec3 in_normal;
 layout(location = 2) in vec2 in_uv;
 uniform mat4 view_proj;
 uniform mat4 view;
+uniform mat4 model;
 out vec3 v_normal;
 out vec3 v_view_normal;
 out vec2 v_uv;
 void main() {
-    gl_Position = view_proj * vec4(in_position, 1.0);
-    v_normal = in_normal;
-    v_view_normal = mat3(view) * in_normal;
+    vec4 world_pos = model * vec4(in_position, 1.0);
+    gl_Position = view_proj * world_pos;
+    mat3 norm_mat = mat3(model);
+    v_normal = norm_mat * in_normal;
+    v_view_normal = mat3(view) * v_normal;
     v_uv = in_uv;
 }
 )";
@@ -66,8 +69,9 @@ const char* kWireVertexShader = R"(
 #version 330 core
 layout(location = 0) in vec3 in_position;
 uniform mat4 view_proj;
+uniform mat4 model;
 void main() {
-    vec4 clip = view_proj * vec4(in_position, 1.0);
+    vec4 clip = view_proj * (model * vec4(in_position, 1.0));
     clip.z -= 8e-5 * clip.w;
     gl_Position = clip;
 }

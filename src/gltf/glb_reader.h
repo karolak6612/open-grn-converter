@@ -15,7 +15,7 @@ namespace grn {
  * @brief Options for importing glTF 2.0 / GLB files.
  */
 struct GlbImportOptions {
-    bool y_up = false; /**< Converts glTF standard Y-up coordinates back to native GRN Z-up. */
+    bool y_up = true;  /**< Converts glTF standard Y-up coordinates back to native GRN Z-up. */
     std::filesystem::path texture_dir; /**< Optional external directory to resolve loose texture files. */
     bool prefer_vtex = true; /**< Prefer VTex encoding for imported textures. */
     float scale = 1.0f;          /**< Uniform scale factor applied to positions and bone translations. */

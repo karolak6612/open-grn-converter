@@ -378,31 +378,55 @@ void GrnAnimSampler::setAnimation(const GrnAnimation& anim, const std::vector<Gr
 
     // Build bone -> track mapping
     bone_to_track_.assign(bones.size(), -1);
+
+    // 1. Build bone name lookup maps (exact and case-insensitive)
     std::unordered_map<std::string, int32_t> nameMap;
+    std::unordered_map<std::string, int32_t> lowerNameMap;
     for (size_t ti = 0; ti < tracks_.size(); ++ti) {
         if (!tracks_[ti].bone_name.empty()) {
             nameMap[tracks_[ti].bone_name] = static_cast<int32_t>(ti);
+            std::string lower = tracks_[ti].bone_name;
+            std::transform(lower.begin(), lower.end(), lower.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            lowerNameMap[lower] = static_cast<int32_t>(ti);
         }
     }
 
+    // 2. Map bones to tracks: prioritize bone name over channel_id
     for (size_t bi = 0; bi < bones.size(); ++bi) {
-        int32_t ch_id = static_cast<int32_t>(bi) + 1; // Granny channel_id convention
         int32_t track_idx = -1;
 
-        // Try match by channel_id
-        for (size_t ti = 0; ti < tracks_.size(); ++ti) {
-            if (tracks_[ti].channel_id == ch_id) {
-                track_idx = static_cast<int32_t>(ti);
-                break;
-            }
+        // Try exact name match
+        auto it = nameMap.find(bones[bi].name);
+        if (it != nameMap.end()) {
+            track_idx = it->second;
         }
-        // Fallback by name
+
+        // Try case-insensitive name match
         if (track_idx < 0) {
-            auto it = nameMap.find(bones[bi].name);
-            if (it != nameMap.end()) {
-                track_idx = it->second;
+            std::string lower = bones[bi].name;
+            std::transform(lower.begin(), lower.end(), lower.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            auto itLower = lowerNameMap.find(lower);
+            if (itLower != lowerNameMap.end()) {
+                track_idx = itLower->second;
             }
         }
+
+        // Fallback by channel_id ONLY if track has no specific name or synthetic name ("Bone_<id>")
+        if (track_idx < 0) {
+            int32_t ch_id = static_cast<int32_t>(bi) + 1; // Granny channel_id convention
+            for (size_t ti = 0; ti < tracks_.size(); ++ti) {
+                if (tracks_[ti].channel_id == ch_id) {
+                    if (tracks_[ti].bone_name.empty() ||
+                        tracks_[ti].bone_name == ("Bone_" + std::to_string(ch_id))) {
+                        track_idx = static_cast<int32_t>(ti);
+                        break;
+                    }
+                }
+            }
+        }
+
         bone_to_track_[bi] = track_idx;
     }
 }

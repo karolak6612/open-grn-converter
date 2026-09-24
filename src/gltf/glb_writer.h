@@ -17,7 +17,7 @@ namespace grn {
  * @brief Configuration parameters for exporting to glTF 2.0 / GLB.
  */
 struct GlbExportOptions {
-    bool y_up = false;                        /**< Convert native Z-up coordinates to standard glTF Y-up. */
+    bool y_up = true;                         /**< Convert native Z-up coordinates to standard glTF Y-up. */
     bool embed_textures = true;               /**< Embed textures inside the GLB binary container. */
     std::filesystem::path loose_texture_dir;  /**< Target directory for loose textures if not embedded. */
     std::string loose_texture_format = "tga"; /**< Format for loose textures ("tga", "png", "vtex"). */

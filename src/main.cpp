@@ -69,7 +69,6 @@ int main(int argc, char* argv[]) {
             force_gui = true;
         } else if (arg == "--anim" && i + 1 < argc) {
             external_anim = argv[++i];
-            force_gui = true;
         } else if (arg == "--convert") {
             auto_convert = true;
             force_gui = true;

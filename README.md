@@ -295,10 +295,12 @@ Launch `grn_converter.exe` directly or pass `--gui`:
 | `--anim <path>` | External animation `.grn` track to merge into the output model (can repeat) |
 | `--split-anims` | Split GLB animations into separate `.grn` files with matching skeletons (default) |
 | `--no-split-anims` | Embed all GLB animations into a single `.grn` container |
-| `--anim-optimizer` | Enable animation optimizer (prune static tracks, collapse redundant keys) (default) |
-| `--no-anim-optimizer` | Disable animation optimizer |
+| `--anim-optimizer` | Enable animation optimizer (prune static tracks, collapse redundant keys) |
+| `--no-anim-optimizer` | Disable animation optimizer (default) |
 | `--anim-fps <val>` | Target uniform animation frame rate (e.g. 30, 20, 15; default 0 = source) |
 | `--anim-min-deg <val>` | Prune tracks with rotation movement < angle in degrees (e.g. 3.0) |
+| `--anim-loop-safe` | Preserve loop boundary keyframes and tangents |
+| `--no-anim-loop-safe` | Disable loop-safe clamping (default) |
 | `--optimizer` | Enable 16-bit vertex partitioner when converting GLB to GRN (default) |
 | `--no-optimizer` | Disable 16-bit vertex partitioner |
 | `--no-embed-textures` | Save textures as loose files next to model instead of embedding |

@@ -11,6 +11,8 @@
 
 namespace grn {
 
+struct GrnModel;
+
 /**
  * @brief Summary statistics returned after completing a conversion job.
  */
@@ -46,5 +48,13 @@ ConversionResult convert_directory(const std::filesystem::path& input_dir,
                                    const std::filesystem::path& output_dir,
                                    const ConversionOptions& options,
                                    ProgressCallback callback = nullptr);
+
+/**
+ * @brief Detects whether a model's primary vertical axis is Z-up (true) or Y-up (false).
+ * Analyzes skeletal hierarchy (head vs pelvis) and vertex bounding box dimensions.
+ * @param model Model to analyze.
+ * @return True if model is Z-up, false if already Y-up.
+ */
+bool detect_is_z_up(const GrnModel& model);
 
 } // namespace grn
