@@ -641,7 +641,7 @@ std::optional<GrnModel> load_glb_memory(const uint8_t* data, size_t size, const 
             }
 
             // Only trust candidate_map if it actually covers ALL used joints in this mesh!
-            // If any joints (e.g. rotor bones 68..80) are missing from candidate_map,
+            // If any joints (e.g. newly rigged bones) are missing from candidate_map,
             // candidate_map is stale or incomplete and used_b must be used instead.
             bool covers_all = !candidate_map.empty();
             if (covers_all) {

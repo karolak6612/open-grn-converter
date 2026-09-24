@@ -338,7 +338,7 @@ bool convert_file(const std::filesystem::path& input,
             auto out_dir = out_path.parent_path();
             std::string stem = out_path.stem().string();
 
-            // Case-insensitive prefix check to avoid double-prefixing (e.g. centi_centi_Centipede_Walk.grn)
+            // Case-insensitive prefix check to avoid double-prefixing (e.g. Character_Character_Walk.grn)
             auto starts_with_ci = [](const std::string& str, const std::string& prefix) -> bool {
                 if (str.size() < prefix.size()) return false;
                 for (size_t i = 0; i < prefix.size(); ++i) {

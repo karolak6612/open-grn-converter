@@ -79,8 +79,8 @@ std::vector<GrnMesh> split_mesh_16bit(const GrnMesh& mesh, uint32_t max_vertices
             }
 
             // Compact bone palette to only bones actually referenced by this submesh's vertex weights.
-            // This prevents massive rig models (e.g. centi with 1,905 bones) from overflowing
-            // the DirectX 8/9 skinning bone palette limits in Sacred Gold!
+            // This prevents massive rig models (e.g. complex rigs with hundreds of bones) from overflowing
+            // downstream engine skinning bone palette limits.
             if (!current_part.weights.empty() && !mesh.bone_index_map.empty()) {
                 std::vector<int32_t> used_local_bones;
                 for (const auto& vw : current_part.weights) {

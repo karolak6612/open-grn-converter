@@ -18,7 +18,7 @@
   - `GRN -> GLB`: Extracts meshes, skeletons, skinning weights (`JOINTS_0`, `WEIGHTS_0`), inverse bind matrices (IBM), materials, embedded textures (DXT1, Raw RGB/RGBA, VTex), and animations into self-contained glTF 2.0 models.
   - `GLB -> GRN`: Ingests glTF models, decomposes bone hierarchies and mesh primitives, transforms coordinates (glTF Y-up to Granny Z-up), generates bit-accurate Granny 1.2b relational chunk hierarchies, string tables, Section 0 descriptors, and relocation footers for in-game execution.
 - **Dual Interface Modes**:
-  - **Modern GUI**: Dear ImGui interface with custom Flat Magic Rune theme, integrated rune icon, drag-and-drop, real-time logging, and batch conversion.
+  - **Modern GUI**: Qt6 + Qlementine interface with 3D Dual-Viewport (OpenGL), animation playback, interactive bone inspector, model stats cards, real-time logging, and batch conversion.
   - **High-Speed CLI**: Headless command-line utility for CI/CD pipelines, automated modding scripts, and batch processing.
 
 ---
@@ -29,14 +29,15 @@ Before making any modifications or investigating issues, ground yourself in **ve
 
 1. **Verify the environment**:
    - CMake 3.22+ and MSVC C++20 toolchain (or GCC 12+ / Clang 14+).
-   - vcpkg packages installed: `glfw3`, `imgui` (with glfw/opengl3 bindings), `nlohmann-json`, `stb`, `glad`.
+   - Qt 6.5+ (Widgets, OpenGLWidgets, Svg, Concurrent).
+   - vcpkg packages installed: `nlohmann-json`, `stb`, `meshoptimizer`.
 2. **Run the baseline test suite**:
    ```bash
    cmake --preset release
    cmake --build --preset release
    ctest --preset release --output-on-failure
    ```
-   Confirm all 6 test targets pass (`test_codecs`, `test_parser`, `test_writer`, `test_roundtrip`, `test_texture_hue`, `test_viewer_compat`).
+   Confirm all 8 test targets pass (`test_codecs`, `test_parser`, `test_writer`, `test_roundtrip`, `test_texture_hue`, `test_viewer_compat`, `test_optimizer`, `test_viewer_engine`).
 3. **Evidence over assumptions**:
    - **Nothing written in documentation is evidence until re-verified.** Always re-run the specific CLI command, CTest, or validator probe to substantiate any claim.
    - Classify all conclusions strictly:
@@ -80,7 +81,7 @@ These rules are non-negotiable across all sessions and agent workflows:
 open-grn-converter/
 ├── CMakeLists.txt             # Primary C++20 CMake build configuration
 ├── CMakePresets.json          # Multi-config build presets (release, debug)
-├── vcpkg.json                 # Dependency manifest (glfw3, imgui, nlohmann-json, stb, glad)
+├── vcpkg.json                 # Dependency manifest (nlohmann-json, stb, meshoptimizer)
 ├── LICENSE                    # MIT License
 ├── README.md                  # Human user documentation & usage guide
 ├── AGENTS.md                  # Machine contract & agent guide (this file)
@@ -98,7 +99,9 @@ open-grn-converter/
 │   ├── converter/             # Bidirectional Orchestration Pipeline
 │   │   ├── options.h          # ConversionOptions structure (scale, z-up, textures, anim)
 │   │   ├── converter.h        # High-level convert_grn_to_glb / convert_glb_to_grn API
-│   │   └── converter.cpp      # Coordinate transforms, IBM calculations, anim merging
+│   │   ├── converter.cpp      # Coordinate transforms, IBM calculations, anim merging
+│   │   ├── anim_optimizer.h/.cpp # Keyframe resampling, micro-bone culling, loop-safe clamping
+│   │   └── mesh_optimizer.h/.cpp # 16-bit safe mesh partitioner and QEM decimation
 │   ├── core/                  # Granny 1.2b Binary Container Engine
 │   │   ├── grn_types.h        # 0xCA5E chunk constants, section headers, GrnModel structures
 │   │   ├── grn_parser.h/.cpp  # Recursive binary chunk parser, skeleton/mesh/anim decoding
@@ -106,11 +109,21 @@ open-grn-converter/
 │   ├── gltf/                  # glTF 2.0 / GLB Importer and Exporter
 │   │   ├── glb_reader.h/.cpp  # cgltf-based GLB reader, node hierarchy, skin & weight parsing
 │   │   └── glb_writer.h/.cpp  # glTF 2.0 JSON + BIN chunk generator, bufferView packing
-│   └── gui/                   # Dear ImGui Desktop Application
-│       ├── app.h/.cpp         # GLFW/OpenGL 3.3 window, lifecycle, Flat Magic Rune theme
-│       ├── ui_panels.h/.cpp   # Panels: Single File, Batch, Settings, Real-time Log Console
-│       ├── file_dialog.h/.cpp # Win32 native file and folder pickers (IFileDialog / GetOpenFileName)
-│       └── embedded_icon.h    # Embedded 32x32 / 64x64 magic rune icon pixel buffer
+│   └── gui/                   # Qt6 + Qlementine GUI Desktop Application
+│       ├── main_window.h/.cpp # Main application shell, toolbar, layout
+│       ├── bone_inspector_widget.h/.cpp # Skeletal tree and transform inspector
+│       ├── glb_options_widget.h/.cpp    # glTF / GLB export parameters & animation optimization
+│       ├── grn_options_widget.h/.cpp    # Granny 1.2b export options & anim merge list
+│       ├── source_info_widget.h/.cpp    # Input model stats and card visualizers
+│       ├── target_info_widget.h/.cpp    # Converted model output cards & folder navigation
+│       ├── log_drawer.h/.cpp  # Collapsible real-time color-coded logging console
+│       └── viewer/            # Embedded 3D Dual-Viewport OpenGL Engine
+│           ├── model_viewer_panel.h/.cpp # Viewport toolbar, single/split mode, camera controls
+│           ├── gl_viewport_widget.h/.cpp # OpenGL widget, shaders, grid, skeleton rendering
+│           ├── playback_bar.h/.cpp       # Animation timeline scrubber, play/pause, speed
+│           ├── skinning_engine.h/.cpp    # CPU skinning and vertex transformation pipeline
+│           ├── grn_anim_sampler.h/.cpp   # Cubic spline / linear animation keyframe sampler
+│           └── camera.h/.cpp             # Arcball orbit camera with pan and zoom
 │
 ├── resources/                 # Application Resources
 │   ├── grn_converter.rc       # Windows resource script (icon embedding)
@@ -129,7 +142,9 @@ open-grn-converter/
     ├── test_writer.cpp        # GRN container serializer & relocation tests
     ├── test_roundtrip.cpp     # Bidirectional GRN <-> GLB roundtrip tests
     ├── test_texture_hue.cpp   # Texture color channel transformations & filtering
-    └── test_viewer_compat.cpp # Live debugger tests verifying 0 crashes in Granny viewer
+    ├── test_viewer_compat.cpp # Live debugger tests verifying 0 crashes in Granny viewer
+    ├── test_optimizer.cpp     # 16-bit mesh partitioner & multi-material split tests
+    └── test_viewer_engine.cpp # 3D viewport, skinning, and animation engine tests
 ```
 
 ---

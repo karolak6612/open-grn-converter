@@ -139,7 +139,7 @@ static void test_multi_material_tri_groups_split() {
     std::cout << "[TEST] Multi-material tri_groups 16-bit partitioning..." << std::endl;
 
     grn::GrnMesh mesh;
-    mesh.name = "Centipede_MultiMat";
+    mesh.name = "Synthetic_MultiMat";
 
     // 3 groups: 30k (mat 0), 20k (mat 1), 35k (mat 2) => total 85k vertices
     const uint32_t count0 = 30000;
@@ -203,24 +203,45 @@ static void test_multi_material_tri_groups_split() {
               << "Part 1 has " << parts[1].tri_groups.size() << " groups (" << parts[1].vertices.size() << " verts).\n";
 }
 
-static void test_centi_decimation() {
-    if (!std::filesystem::exists("test_data/centi.glb")) return;
-    std::cout << "[TEST] Centi GLB Decimation..." << std::endl;
-    grn::GlbImportOptions imp;
-    auto model = grn::load_glb_file("test_data/centi.glb", imp);
-    assert(model.has_value());
-    assert(model->meshes.size() == 1);
-    std::cout << "  Original centi: " << model->meshes[0].vertices.size() << " verts, "
-              << model->meshes[0].faces.size() << " tris\n";
+static void test_synthetic_mesh_decimation() {
+    std::cout << "[TEST] Synthetic Mesh Decimation (QEM)..." << std::endl;
+    grn::GrnMesh mesh;
+    mesh.name = "Synthetic_Decimate_Test";
+    // Build a grid of vertices and triangles
+    const uint32_t grid_dim = 50; // 50x50 = 2500 vertices
+    mesh.vertices.resize(grid_dim * grid_dim);
+    mesh.normals.resize(grid_dim * grid_dim);
+    mesh.uvs.resize(grid_dim * grid_dim);
+    for (uint32_t y = 0; y < grid_dim; ++y) {
+        for (uint32_t x = 0; x < grid_dim; ++x) {
+            uint32_t idx = y * grid_dim + x;
+            mesh.vertices[idx] = { static_cast<float>(x), static_cast<float>(y), 0.0f };
+            mesh.normals[idx] = { 0.0f, 0.0f, 1.0f };
+            mesh.uvs[idx] = { static_cast<float>(x) / (grid_dim - 1), static_cast<float>(y) / (grid_dim - 1) };
+        }
+    }
+    for (uint32_t y = 0; y < grid_dim - 1; ++y) {
+        for (uint32_t x = 0; x < grid_dim - 1; ++x) {
+            uint32_t v0 = y * grid_dim + x;
+            uint32_t v1 = y * grid_dim + (x + 1);
+            uint32_t v2 = (y + 1) * grid_dim + x;
+            uint32_t v3 = (y + 1) * grid_dim + (x + 1);
+            mesh.faces.push_back({ v0, v1, v2 });
+            mesh.faces.push_back({ v1, v3, v2 });
+        }
+    }
+    mesh.face_uvs = mesh.faces;
+    mesh.face_normals = mesh.faces;
 
-    grn::GrnMesh mesh_copy = model->meshes[0];
-    bool decimated = grn::decimate_mesh(mesh_copy, 0.3f, 30000);
+    size_t orig_faces = mesh.faces.size();
+    assert(orig_faces == (grid_dim - 1) * (grid_dim - 1) * 2);
+
+    bool decimated = grn::decimate_mesh(mesh, 0.5f, 3000);
     assert(decimated);
     (void)decimated;
-    std::cout << "  Decimated centi: " << mesh_copy.vertices.size() << " verts, "
-              << mesh_copy.faces.size() << " tris\n";
-    assert(mesh_copy.vertices.size() <= 35000);
-    assert(mesh_copy.faces.size() <= 12000);
+    assert(mesh.faces.size() < orig_faces);
+    assert(mesh.faces.size() <= 3000);
+    std::cout << "  ✓ Decimation reduced " << orig_faces << " tris to " << mesh.faces.size() << " tris.\n";
 }
 
 int main() {
@@ -228,7 +249,7 @@ int main() {
         test_split_97k_mesh();
         test_model_optimizer_roundtrip();
         test_multi_material_tri_groups_split();
-        test_centi_decimation();
+        test_synthetic_mesh_decimation();
         std::cout << "\n[PASS] All mesh optimizer tests passed successfully!\n";
         return 0;
     } catch (const std::exception& ex) {
