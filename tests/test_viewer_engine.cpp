@@ -6,9 +6,13 @@
 
 #include "core/grn_types.h"
 #include "core/grn_parser.h"
+#include "gltf/glb_reader.h"
 #include "gui/viewer/camera.h"
 #include "gui/viewer/grn_anim_sampler.h"
 #include "gui/viewer/skinning_engine.h"
+#include <QGuiApplication>
+#include <QFont>
+#include <QFontMetrics>
 
 #include <iostream>
 #include <cassert>
@@ -24,7 +28,9 @@ static fs::path find_asset(const std::string& relPath) {
         fs::current_path() / relPath,
         fs::current_path() / ".." / relPath,
         fs::current_path() / "test_grn" / relPath,
-        fs::path("E:/Github/open-grn-converter") / relPath
+#ifdef GRN_SOURCE_CODE_DIR
+        fs::path(GRN_SOURCE_CODE_DIR) / relPath,
+#endif
     };
     for (const auto& p : candidates) {
         std::error_code ec;
@@ -317,13 +323,96 @@ static void test_skinning_engine_scale() {
     std::cout << "  -> SkinningEngine scale passed" << std::endl;
 }
 
-int main() {
+static void test_bone_labels() {
+    std::cout << "[TEST] Bone label projection and culling ..." << std::endl;
+    fs::path barbPath = find_asset("test_grn/GLB/BARBARIAN.glb");
+    if (barbPath.empty()) return;
+
+    grn::GlbImportOptions glbOpts;
+    glbOpts.y_up = false;
+    auto modelOpt = grn::load_glb_file(barbPath, glbOpts);
+    assert(modelOpt.has_value());
+    auto& model = *modelOpt;
+    grn::SkinningEngine engine;
+    engine.setModel(&model);
+    engine.evaluate(0.0f);
+
+    grn::OrbitCamera cam;
+    QVector3D minB, maxB;
+    engine.computeBounds(minB, maxB);
+    cam.frameBounds(minB, maxB);
+    QMatrix4x4 vp = cam.viewProj(1.0f);
+
+    const auto& world = engine.worldMatrices();
+    float w = 300.0f;
+    float h = 600.0f;
+    int placed = 0;
+    std::vector<QRect> placedRects;
+    QFont font("Arial", 8);
+    QFontMetrics fm(font);
+
+    size_t numBones = model.bones.size();
+    std::vector<int> childCount(numBones, 0);
+    for (size_t i = 0; i < numBones; ++i) {
+        int32_t p = model.bones[i].parent_index;
+        if (p >= 0 && static_cast<size_t>(p) < numBones && static_cast<size_t>(p) != i) {
+            childCount[p]++;
+        }
+    }
+
+    std::vector<size_t> candidates;
+    for (size_t i = 0; i < numBones; ++i) {
+        candidates.push_back(i);
+    }
+    std::stable_sort(candidates.begin(), candidates.end(), [&](size_t a, size_t b) {
+        return childCount[a] > childCount[b];
+    });
+
+    for (size_t i : candidates) {
+        QVector3D pBone = world[i].map(QVector3D(0.0f, 0.0f, 0.0f));
+        QVector4D clip = vp * QVector4D(pBone, 1.0f);
+        if (clip.w() <= 0.05f) continue;
+        float ndcX = clip.x() / clip.w();
+        float ndcY = clip.y() / clip.w();
+        float ndcZ = clip.z() / clip.w();
+        if (ndcX < -1.02f || ndcX > 1.02f || ndcY < -1.02f || ndcY > 1.02f || ndcZ < -1.0f || ndcZ > 1.0f) continue;
+
+        int sx = static_cast<int>((ndcX * 0.5f + 0.5f) * w);
+        int sy = static_cast<int>((1.0f - (ndcY * 0.5f + 0.5f)) * h);
+
+        QString labelText = QString("[%1] %2").arg(static_cast<int>(i)).arg(QString::fromStdString(model.bones[i].name));
+        int textW = fm.horizontalAdvance(labelText);
+        int textH = fm.height();
+        bool onRight = (sx >= w * 0.5f);
+        int rectX = onRight ? (sx + 4) : (sx - textW - 12);
+        QRect bgRect(rectX, sy - textH / 2 - 2, textW + 8, textH + 4);
+        QRect padded = bgRect.adjusted(-2, -2, 2, 2);
+
+        bool collides = false;
+        for (const auto& r : placedRects) {
+            if (r.intersects(padded)) {
+                collides = true;
+                break;
+            }
+        }
+        if (collides) continue;
+
+        placedRects.push_back(bgRect);
+        placed++;
+    }
+    assert(placed >= 15 && placed <= 35);
+    std::cout << "  -> Bone labels passed (" << placed << " non-overlapping badges placed)" << std::endl;
+}
+
+int main(int argc, char* argv[]) {
+    QGuiApplication app(argc, argv);
     try {
         test_orbit_camera();
         test_grn_anim_sampler_synthetic();
         test_skinning_engine_synthetic();
         test_viewer_real_assets();
         test_skinning_engine_scale();
+        test_bone_labels();
         std::cout << "\nALL VIEWER ENGINE TESTS PASSED!" << std::endl;
         return 0;
     } catch (const std::exception& ex) {

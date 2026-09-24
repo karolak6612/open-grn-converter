@@ -24,6 +24,11 @@ public:
     void setEmbedAnims(bool enabled);
     void setEmbedTextures(bool enabled);
     void setActiveTab(int index);
+    void setRightTab(int index);
+    void setShowSkeleton(bool show);
+    void setShowBoneLabels(bool show);
+    void setBoneLabelsLOD(bool enabled);
+    bool boneLabelsLOD() const;
     void setPreviewVisible(bool visible);
     bool isPreviewVisible() const;
     void addExternalAnimation(const QString& path);

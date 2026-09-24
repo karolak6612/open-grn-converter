@@ -22,12 +22,19 @@ public:
     bool splitAnimations() const;
     bool autoSplit16Bit() const;
     bool isMeshOptimizerEnabled() const;
-    bool decimateEnabled() const;
-    uint32_t targetMaxVertices() const;
+    bool isAnimOptimizerEnabled() const;
+    float animTargetFps() const;
+    float animMinRotationDeg() const;
+    bool animLoopSafe() const;
 
     void setSplitAnimations(bool split);
     void setMeshOptimizerEnabled(bool enabled);
+    void setAnimOptimizerEnabled(bool enabled);
+    void setAnimTargetFps(float fps);
+    void setAnimMinRotationDeg(float deg);
+    void setAnimLoopSafe(bool safe);
     void setModelAnalysis(const struct GrnModel* model);
+    void selectAnimationItem(int index);
     void reset();
 
 signals:

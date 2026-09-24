@@ -302,6 +302,7 @@ std::optional<GrnModel> load_glb_memory(const uint8_t* data, size_t size, const 
         for (size_t j = 0; j < skin.joints_count; ++j) {
             const auto* jnode = skin.joints[j];
             GrnBone bone;
+            bone.index = static_cast<int32_t>(j);
             bone.name = jnode->name ? jnode->name : ("Bone_" + std::to_string(j));
 
             if (jnode->parent && node_to_joint.count(jnode->parent)) {
@@ -717,9 +718,10 @@ std::optional<GrnModel> load_glb_memory(const uint8_t* data, size_t size, const 
                     continue;
                 }
                 GrnBone b;
+                joint_idx = static_cast<int32_t>(model.bones.size());
+                b.index = joint_idx;
                 b.name = tnode->name ? tnode->name : ("Node_" + std::to_string(model.bones.size()));
                 b.parent_index = -1;
-                joint_idx = static_cast<int32_t>(model.bones.size());
                 node_to_joint[tnode] = joint_idx;
                 model.bones.push_back(std::move(b));
             }
@@ -915,6 +917,10 @@ std::optional<GrnModel> load_glb_memory(const uint8_t* data, size_t size, const 
                 b.position.z *= auto_s;
             }
         }
+    }
+
+    for (size_t bi = 0; bi < model.bones.size(); ++bi) {
+        model.bones[bi].index = static_cast<int32_t>(bi);
     }
 
     cgltf_free(gltf);

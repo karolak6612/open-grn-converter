@@ -140,32 +140,38 @@ open-grn-converter/
 
 ### Prerequisites
 
-- **C++20 Compiler**: Visual Studio 2022 / 2026 (MSVC), Clang-cl, or GCC 12+.
+- **C++20 Compiler**: Visual Studio 2022 (MSVC), Clang, or GCC 12+.
 - **CMake**: Version 3.22 or higher.
-- **vcpkg**: Microsoft C++ Library Manager (used to satisfy `glfw3`, `imgui`, `nlohmann-json`, `stb`, and `glad`).
+- **Qt 6**: Version 6.5+ (Widgets, OpenGLWidgets, Svg, Concurrent). Set `QT_DIR` or `CMAKE_PREFIX_PATH` to your Qt installation (e.g. `C:/Qt/6.11.2/msvc2022_64`).
+- **vcpkg**: Microsoft C++ Library Manager (used to satisfy `nlohmann-json`, `stb`, and `meshoptimizer`). Set `VCPKG_ROOT` to your vcpkg clone directory (e.g. `C:/vcpkg`).
 
-### Option A: Standard CMake CLI
+### Option A: Using CMake Presets (Recommended)
+
+```bash
+# Configure using preset (uses $env{VCPKG_ROOT} and $env{QT_DIR})
+cmake --preset release
+
+# Build Release executable and test suite
+cmake --build --preset release
+
+# Run automated tests
+ctest --preset release --output-on-failure
+```
+
+### Option B: Standard CMake CLI
 
 ```bash
 # 1. Clone repository
 git clone https://github.com/karolak6612/open-grn-converter.git
 cd open-grn-converter
 
-# 2. Configure with CMake and vcpkg toolchain
-cmake -B build -S . -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake
+# 2. Configure with CMake, vcpkg toolchain, and Qt prefix
+cmake -B build -S . \
+  -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+  -DCMAKE_PREFIX_PATH="$env:QT_DIR"
 
 # 3. Build Release executable and test suite
 cmake --build build --config Release -j
-```
-
-### Option B: Using CMake Presets
-
-```bash
-# Configure using preset
-cmake --preset release
-
-# Build using preset
-cmake --build --preset release
 ```
 
 *(Alternatively, open the repository folder in **Visual Studio** or **VS Code** with the CMake Tools extension, select the `release` preset, and click Build).*

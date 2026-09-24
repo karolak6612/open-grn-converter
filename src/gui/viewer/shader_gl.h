@@ -11,6 +11,7 @@ GLuint linkProgram(QOpenGLFunctions_3_3_Core* gl, const char* vs_src, const char
 GLuint createMeshProgram(QOpenGLFunctions_3_3_Core* gl);
 GLuint createWireProgram(QOpenGLFunctions_3_3_Core* gl);
 GLuint createGridProgram(QOpenGLFunctions_3_3_Core* gl);
+GLuint createUIProgram(QOpenGLFunctions_3_3_Core* gl);
 GLuint createMatcapTexture(QOpenGLFunctions_3_3_Core* gl);
 
 } // namespace grn

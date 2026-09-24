@@ -31,6 +31,7 @@ public:
     void computeBounds(QVector3D& out_min, QVector3D& out_max) const;
 
     bool hasModel() const { return model_ != nullptr; }
+    const GrnModel* model() const { return model_; }
     bool hasAnimation() const { return sampler_.hasAnimation(); }
     float duration() const { return sampler_.duration(); }
     float fps() const { return sampler_.fps(); }

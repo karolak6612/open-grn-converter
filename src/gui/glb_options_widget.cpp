@@ -36,11 +36,17 @@ struct GlbOptionsWidget::Impl {
     oclero::qlementine::Switch* splitAnimsSwitch{ nullptr };
     oclero::qlementine::Switch* autoSplit16BitSwitch{ nullptr };
     QLabel* optimizerStatusLabel{ nullptr };
-    oclero::qlementine::Switch* decimateSwitch{ nullptr };
-    QSpinBox* targetVertsSpin{ nullptr };
     size_t lastAnalyzedMaxVerts{ 0 };
     bool lastAnalyzedExceeded{ false };
     bool userManuallyToggled{ false };
+
+    // Animation Optimization controls
+    oclero::qlementine::Switch* animOptimizerSwitch{ nullptr };
+    QComboBox* animFpsCombo{ nullptr };
+    QDoubleSpinBox* animCustomFpsSpin{ nullptr };
+    QComboBox* animCullCombo{ nullptr };
+    oclero::qlementine::Switch* animLoopSafeSwitch{ nullptr };
+    QLabel* animStatusLabel{ nullptr };
 
     QWidget* animSectionWidget{ nullptr };
     QLabel* animLabel{ nullptr };
@@ -133,6 +139,75 @@ struct GlbOptionsWidget::Impl {
         });
         optLayout->addRow(owner.tr("Split Animations:"), splitAnimsSwitch);
 
+        animOptimizerSwitch = new oclero::qlementine::Switch(optCard);
+        animOptimizerSwitch->setChecked(true);
+        animOptimizerSwitch->setToolTip(owner.tr("Prune static rest-pose bone tracks and redundant keyframes to prevent 32-bit memory exhaustion and crashes in Granny viewers and engine"));
+        QObject::connect(animOptimizerSwitch, &oclero::qlementine::Switch::clicked, &owner, [this]() {
+            updateAnimControlsState();
+            emit owner.optionsChanged();
+        });
+        optLayout->addRow(owner.tr("Animation Optimizer:"), animOptimizerSwitch);
+
+        auto* fpsRow = new QHBoxLayout();
+        fpsRow->setContentsMargins(0, 0, 0, 0);
+        fpsRow->setSpacing(6);
+
+        animFpsCombo = new QComboBox(optCard);
+        animFpsCombo->addItems({
+            owner.tr("Source FPS (Unchanged)"),
+            owner.tr("30 FPS (Standard)"),
+            owner.tr("20 FPS (Optimized)"),
+            owner.tr("15 FPS (Aggressive)"),
+            owner.tr("Custom FPS")
+        });
+        animFpsCombo->setFixedHeight(24);
+        fpsRow->addWidget(animFpsCombo, 1);
+
+        animCustomFpsSpin = new QDoubleSpinBox(optCard);
+        animCustomFpsSpin->setRange(1.0, 120.0);
+        animCustomFpsSpin->setDecimals(1);
+        animCustomFpsSpin->setValue(30.0);
+        animCustomFpsSpin->setSingleStep(5.0);
+        animCustomFpsSpin->setSuffix(" FPS");
+        animCustomFpsSpin->setFixedHeight(24);
+        animCustomFpsSpin->setEnabled(false);
+        fpsRow->addWidget(animCustomFpsSpin, 0);
+
+        QObject::connect(animFpsCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), &owner, [this](int idx) {
+            animCustomFpsSpin->setEnabled(animOptimizerSwitch->isChecked() && idx == 4);
+            emit owner.optionsChanged();
+        });
+        QObject::connect(animCustomFpsSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged), &owner, [this](double) {
+            emit owner.optionsChanged();
+        });
+        optLayout->addRow(owner.tr("Resample Frame Rate:"), fpsRow);
+
+        animCullCombo = new QComboBox(optCard);
+        animCullCombo->addItems({
+            owner.tr("Off (Keep all bones)"),
+            owner.tr("1.5° (Subtle noise)"),
+            owner.tr("3.0° (Recommended >600 bones)"),
+            owner.tr("5.0° (Aggressive)")
+        });
+        animCullCombo->setFixedHeight(24);
+        animCullCombo->setToolTip(owner.tr("Prune micro-rotations below threshold to prevent 32-bit viewer memory exhaustion on massive rigs (>600 bones)"));
+        QObject::connect(animCullCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), &owner, [this](int) {
+            emit owner.optionsChanged();
+        });
+        optLayout->addRow(owner.tr("Micro-Bone Culling:"), animCullCombo);
+
+        animLoopSafeSwitch = new oclero::qlementine::Switch(optCard);
+        animLoopSafeSwitch->setChecked(true);
+        animLoopSafeSwitch->setToolTip(owner.tr("Enforce exact matching start and end keyframes to eliminate animation loop seam popping"));
+        QObject::connect(animLoopSafeSwitch, &oclero::qlementine::Switch::clicked, &owner, [this]() {
+            emit owner.optionsChanged();
+        });
+        optLayout->addRow(owner.tr("Loop-Safe Clamping:"), animLoopSafeSwitch);
+
+        animStatusLabel = new QLabel(owner.tr("(Auto-detected on load)"), optCard);
+        animStatusLabel->setStyleSheet("font-size: 11px; color: #888888;");
+        optLayout->addRow(owner.tr("Rig Safety Status:"), animStatusLabel);
+
         auto* optRow = new QHBoxLayout();
         optRow->setContentsMargins(0, 0, 0, 0);
         optRow->setSpacing(6);
@@ -153,35 +228,8 @@ struct GlbOptionsWidget::Impl {
             emit owner.optionsChanged();
         });
         optLayout->addRow(owner.tr("Mesh Optimizer (16-bit):"), optRow);
- 
-        auto* decimateRow = new QHBoxLayout();
-        decimateRow->setContentsMargins(0, 0, 0, 0);
-        decimateRow->setSpacing(6);
 
-        decimateSwitch = new oclero::qlementine::Switch(optCard);
-        decimateSwitch->setChecked(false);
-        decimateSwitch->setToolTip(owner.tr("Reduce polygon and vertex count via quadric error decimation to safely fit within game engine limits while preserving materials and UVs"));
-        decimateRow->addWidget(decimateSwitch);
-
-        targetVertsSpin = new QSpinBox(optCard);
-        targetVertsSpin->setRange(1000, 65000);
-        targetVertsSpin->setValue(30000);
-        targetVertsSpin->setSingleStep(2500);
-        targetVertsSpin->setSuffix(" verts");
-        targetVertsSpin->setEnabled(false);
-        targetVertsSpin->setFixedHeight(24);
-        targetVertsSpin->setToolTip(owner.tr("Target maximum vertex budget for decimation"));
-        decimateRow->addWidget(targetVertsSpin);
-        decimateRow->addStretch(1);
-
-        QObject::connect(decimateSwitch, &oclero::qlementine::Switch::clicked, &owner, [this]() {
-            targetVertsSpin->setEnabled(decimateSwitch->isChecked());
-            emit owner.optionsChanged();
-        });
-        QObject::connect(targetVertsSpin, QOverload<int>::of(&QSpinBox::valueChanged), &owner, [this](int) {
-            emit owner.optionsChanged();
-        });
-        optLayout->addRow(owner.tr("Decimate Geometry:"), decimateRow);
+        updateAnimControlsState();
 
         layout->addWidget(optCard);
 
@@ -325,6 +373,14 @@ struct GlbOptionsWidget::Impl {
         }
     }
 
+    void updateAnimControlsState() {
+        bool opt = animOptimizerSwitch ? animOptimizerSwitch->isChecked() : false;
+        if (animFpsCombo) animFpsCombo->setEnabled(opt);
+        if (animCustomFpsSpin) animCustomFpsSpin->setEnabled(opt && animFpsCombo && animFpsCombo->currentIndex() == 4);
+        if (animCullCombo) animCullCombo->setEnabled(opt);
+        if (animLoopSafeSwitch) animLoopSafeSwitch->setEnabled(opt);
+    }
+
     void setModelAnalysis(const GrnModel* model) {
         userManuallyToggled = false;
         if (!model || model->meshes.empty()) {
@@ -332,20 +388,37 @@ struct GlbOptionsWidget::Impl {
             lastAnalyzedExceeded = false;
             autoSplit16BitSwitch->setChecked(false);
             updateOptimizerStatusText();
-            return;
+        } else {
+            size_t maxVerts = 0;
+            for (const auto& m : model->meshes) {
+                maxVerts = std::max(maxVerts, m.vertices.size());
+            }
+
+            lastAnalyzedMaxVerts = maxVerts;
+            lastAnalyzedExceeded = (maxVerts > 64000);
+
+            // Auto-detect: turn ON if > 64000, turn OFF if <= 64000
+            autoSplit16BitSwitch->setChecked(lastAnalyzedExceeded);
+            updateOptimizerStatusText();
         }
 
-        size_t maxVerts = 0;
-        for (const auto& m : model->meshes) {
-            maxVerts = std::max(maxVerts, m.vertices.size());
+        // Rig safety analysis
+        if (animStatusLabel) {
+            size_t numBones = model ? model->bones.size() : 0;
+            if (numBones > 600) {
+                animStatusLabel->setText(owner.tr("Heavy Rig: %1 bones! (3.0° culling recommended)").arg(numBones));
+                animStatusLabel->setStyleSheet("font-size: 11px; color: #d88000; font-weight: bold;");
+                if (animCullCombo && animCullCombo->currentIndex() == 0) {
+                    animCullCombo->setCurrentIndex(2); // Auto-suggest 3.0°
+                }
+            } else if (numBones > 0) {
+                animStatusLabel->setText(owner.tr("Rig: %1 bones (Safe)").arg(numBones));
+                animStatusLabel->setStyleSheet("font-size: 11px; color: #28a745;");
+            } else {
+                animStatusLabel->setText(owner.tr("No skeletal rig in model"));
+                animStatusLabel->setStyleSheet("font-size: 11px; color: #888888;");
+            }
         }
-
-        lastAnalyzedMaxVerts = maxVerts;
-        lastAnalyzedExceeded = (maxVerts > 64000);
-
-        // Auto-detect: turn ON if > 64000, turn OFF if <= 64000
-        autoSplit16BitSwitch->setChecked(lastAnalyzedExceeded);
-        updateOptimizerStatusText();
     }
 
     void reset() {
@@ -357,16 +430,24 @@ struct GlbOptionsWidget::Impl {
         targetHeightSpin->setEnabled(false);
         vtexCompressSwitch->setChecked(true);
         splitAnimsSwitch->setChecked(true);
+        if (animOptimizerSwitch) animOptimizerSwitch->setChecked(true);
+        if (animFpsCombo) animFpsCombo->setCurrentIndex(0);
+        if (animCustomFpsSpin) {
+            animCustomFpsSpin->setValue(30.0);
+            animCustomFpsSpin->setEnabled(false);
+        }
+        if (animCullCombo) animCullCombo->setCurrentIndex(0);
+        if (animLoopSafeSwitch) animLoopSafeSwitch->setChecked(true);
+        if (animStatusLabel) {
+            animStatusLabel->setText(owner.tr("(Auto-detected on load)"));
+            animStatusLabel->setStyleSheet("font-size: 11px; color: #888888;");
+        }
         autoSplit16BitSwitch->setChecked(false);
         userManuallyToggled = false;
         lastAnalyzedMaxVerts = 0;
         lastAnalyzedExceeded = false;
         updateOptimizerStatusText();
-        if (decimateSwitch) decimateSwitch->setChecked(false);
-        if (targetVertsSpin) {
-            targetVertsSpin->setValue(30000);
-            targetVertsSpin->setEnabled(false);
-        }
+        updateAnimControlsState();
         animSectionWidget->setVisible(true);
         bottomStretch->setVisible(false);
         rebuildTree();
@@ -417,12 +498,72 @@ bool GlbOptionsWidget::isMeshOptimizerEnabled() const {
     return _impl->autoSplit16BitSwitch->isChecked();
 }
 
-bool GlbOptionsWidget::decimateEnabled() const {
-    return _impl->decimateSwitch ? _impl->decimateSwitch->isChecked() : false;
+float GlbOptionsWidget::animTargetFps() const {
+    if (!_impl->animOptimizerSwitch || !_impl->animOptimizerSwitch->isChecked()) return 0.0f;
+    int idx = _impl->animFpsCombo ? _impl->animFpsCombo->currentIndex() : 0;
+    switch (idx) {
+        case 1: return 30.0f;
+        case 2: return 20.0f;
+        case 3: return 15.0f;
+        case 4: return _impl->animCustomFpsSpin ? static_cast<float>(_impl->animCustomFpsSpin->value()) : 30.0f;
+        default: return 0.0f; // Source FPS
+    }
 }
 
-uint32_t GlbOptionsWidget::targetMaxVertices() const {
-    return _impl->targetVertsSpin ? static_cast<uint32_t>(_impl->targetVertsSpin->value()) : 30000;
+float GlbOptionsWidget::animMinRotationDeg() const {
+    if (!_impl->animOptimizerSwitch || !_impl->animOptimizerSwitch->isChecked()) return 0.0f;
+    int idx = _impl->animCullCombo ? _impl->animCullCombo->currentIndex() : 0;
+    switch (idx) {
+        case 1: return 1.5f;
+        case 2: return 3.0f;
+        case 3: return 5.0f;
+        default: return 0.0f;
+    }
+}
+
+bool GlbOptionsWidget::animLoopSafe() const {
+    if (!_impl->animOptimizerSwitch || !_impl->animOptimizerSwitch->isChecked()) return false;
+    return _impl->animLoopSafeSwitch ? _impl->animLoopSafeSwitch->isChecked() : true;
+}
+
+void GlbOptionsWidget::setAnimTargetFps(float fps) {
+    if (!_impl->animFpsCombo) return;
+    if (std::abs(fps - 0.0f) < 0.1f) {
+        _impl->animFpsCombo->setCurrentIndex(0);
+    } else if (std::abs(fps - 30.0f) < 0.1f) {
+        _impl->animFpsCombo->setCurrentIndex(1);
+    } else if (std::abs(fps - 20.0f) < 0.1f) {
+        _impl->animFpsCombo->setCurrentIndex(2);
+    } else if (std::abs(fps - 15.0f) < 0.1f) {
+        _impl->animFpsCombo->setCurrentIndex(3);
+    } else {
+        _impl->animFpsCombo->setCurrentIndex(4);
+        if (_impl->animCustomFpsSpin) {
+            _impl->animCustomFpsSpin->setValue(fps);
+        }
+    }
+    emit optionsChanged();
+}
+
+void GlbOptionsWidget::setAnimMinRotationDeg(float deg) {
+    if (!_impl->animCullCombo) return;
+    if (deg >= 4.5f) {
+        _impl->animCullCombo->setCurrentIndex(3);
+    } else if (deg >= 2.5f) {
+        _impl->animCullCombo->setCurrentIndex(2);
+    } else if (deg >= 1.0f) {
+        _impl->animCullCombo->setCurrentIndex(1);
+    } else {
+        _impl->animCullCombo->setCurrentIndex(0);
+    }
+    emit optionsChanged();
+}
+
+void GlbOptionsWidget::setAnimLoopSafe(bool safe) {
+    if (_impl->animLoopSafeSwitch) {
+        _impl->animLoopSafeSwitch->setChecked(safe);
+        emit optionsChanged();
+    }
 }
 
 void GlbOptionsWidget::setMeshOptimizerEnabled(bool enabled) {
@@ -430,6 +571,17 @@ void GlbOptionsWidget::setMeshOptimizerEnabled(bool enabled) {
     _impl->autoSplit16BitSwitch->setChecked(enabled);
     _impl->updateOptimizerStatusText();
     emit optionsChanged();
+}
+
+bool GlbOptionsWidget::isAnimOptimizerEnabled() const {
+    return _impl->animOptimizerSwitch ? _impl->animOptimizerSwitch->isChecked() : true;
+}
+
+void GlbOptionsWidget::setAnimOptimizerEnabled(bool enabled) {
+    if (_impl->animOptimizerSwitch) {
+        _impl->animOptimizerSwitch->setChecked(enabled);
+        emit optionsChanged();
+    }
 }
 
 void GlbOptionsWidget::setModelAnalysis(const GrnModel* model) {
@@ -441,6 +593,21 @@ void GlbOptionsWidget::setSplitAnimations(bool split) {
     _impl->animSectionWidget->setVisible(split);
     _impl->bottomStretch->setVisible(!split);
     emit optionsChanged();
+}
+
+void GlbOptionsWidget::selectAnimationItem(int index) {
+    if (!_impl->treeWidget) return;
+    auto* root = _impl->treeWidget->topLevelItem(0);
+    if (!root) return;
+    if (index >= 0 && index < root->childCount()) {
+        _impl->treeWidget->blockSignals(true);
+        _impl->treeWidget->setCurrentItem(root->child(index));
+        _impl->treeWidget->blockSignals(false);
+    } else if (index < 0) {
+        _impl->treeWidget->blockSignals(true);
+        _impl->treeWidget->setCurrentItem(root);
+        _impl->treeWidget->blockSignals(false);
+    }
 }
 
 void GlbOptionsWidget::reset() {

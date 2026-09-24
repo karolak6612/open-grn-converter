@@ -26,8 +26,14 @@ endif()
 add_compile_definitions(GRN_SOURCE_CODE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 
 # Fallback Qt6 prefix path
-if(WIN32 AND NOT DEFINED CMAKE_PREFIX_PATH AND EXISTS "C:/Qt/6.11.2/msvc2022_64")
-    list(APPEND CMAKE_PREFIX_PATH "C:/Qt/6.11.2/msvc2022_64")
+if(WIN32)
+    if(DEFINED ENV{CMAKE_PREFIX_PATH})
+        list(APPEND CMAKE_PREFIX_PATH "$ENV{CMAKE_PREFIX_PATH}")
+    elseif(DEFINED ENV{QT_DIR})
+        list(APPEND CMAKE_PREFIX_PATH "$ENV{QT_DIR}")
+    elseif(NOT DEFINED CMAKE_PREFIX_PATH AND EXISTS "C:/Qt/6.11.2/msvc2022_64")
+        list(APPEND CMAKE_PREFIX_PATH "C:/Qt/6.11.2/msvc2022_64")
+    endif()
 endif()
 
 # Find external dependencies
@@ -67,6 +73,7 @@ set(GRN_CORE_SOURCES
     src/gltf/glb_writer.cpp
     src/converter/converter.cpp
     src/converter/mesh_optimizer.cpp
+    src/converter/anim_optimizer.cpp
 )
 
 set(GRN_CORE_HEADERS
@@ -81,6 +88,7 @@ set(GRN_CORE_HEADERS
     src/converter/options.h
     src/converter/converter.h
     src/converter/mesh_optimizer.h
+    src/converter/anim_optimizer.h
 )
 
 add_library(grn_core STATIC
@@ -117,12 +125,14 @@ set(GRN_APP_SOURCES
     src/gui/viewer/grn_anim_sampler.cpp
     src/gui/viewer/skinning_engine.cpp
     src/gui/viewer/shader_gl.cpp
+    src/gui/viewer/font_atlas.cpp
     src/gui/viewer/mesh_gl.cpp
     src/gui/viewer/playback_bar.cpp
     src/gui/viewer/viewport_widget.cpp
     src/gui/viewer/model_viewer_panel.cpp
     src/gui/target_info_widget.cpp
     src/gui/source_info_widget.cpp
+    src/gui/bone_inspector_widget.cpp
 )
 
 set(GRN_APP_HEADERS
@@ -131,6 +141,7 @@ set(GRN_APP_HEADERS
     src/gui/conversion_worker.h
     src/gui/grn_options_widget.h
     src/gui/glb_options_widget.h
+    src/gui/bone_inspector_widget.h
     src/gui/log_drawer.h
     src/gui/section_card.h
     src/gui/gui_utils.h
@@ -140,6 +151,7 @@ set(GRN_APP_HEADERS
     src/gui/viewer/grn_anim_sampler.h
     src/gui/viewer/skinning_engine.h
     src/gui/viewer/shader_gl.h
+    src/gui/viewer/font_atlas.h
     src/gui/viewer/mesh_gl.h
     src/gui/viewer/playback_bar.h
     src/gui/viewer/viewport_widget.h
@@ -193,7 +205,11 @@ if(WIN32)
     )
 
     # Automatically deploy Qt DLLs and plugins using windeployqt
-    find_program(WINDEPLOYQT_EXECUTABLE windeployqt HINTS "C:/Qt/6.11.2/msvc2022_64/bin")
+    find_program(WINDEPLOYQT_EXECUTABLE windeployqt HINTS
+        "$ENV{QT_DIR}/bin"
+        "${CMAKE_PREFIX_PATH}/bin"
+        "C:/Qt/6.11.2/msvc2022_64/bin"
+    )
     if(WINDEPLOYQT_EXECUTABLE)
         add_custom_command(TARGET grn_converter POST_BUILD
             COMMAND "${WINDEPLOYQT_EXECUTABLE}"

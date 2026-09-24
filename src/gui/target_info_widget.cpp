@@ -1,6 +1,7 @@
 #include "target_info_widget.h"
 #include "section_card.h"
 #include "gui_utils.h"
+#include "../core/grn_parser.h"
 
 #include <oclero/qlementine/icons/Icons16.hpp>
 #include <QVBoxLayout>
@@ -41,6 +42,10 @@ struct TargetInfoWidget::Impl {
     QPushButton* openFolderBtn{ nullptr };
 
     QString currentOutputPath;
+    const GrnModel* baseModel{ nullptr };
+    QString baseOutputPath;
+    bool baseIsGlb{ false };
+    QString baseValidationSummary;
 
     explicit Impl(TargetInfoWidget& o) : owner(o) {
         setupUI();
@@ -111,7 +116,7 @@ struct TargetInfoWidget::Impl {
         treeLayout->setContentsMargins(6, 6, 6, 6);
         treeLayout->setSpacing(4);
 
-        auto* treeTitle = new QLabel(owner.tr("Converted Animations"), treeCard);
+        auto* treeTitle = new QLabel(owner.tr("Converted Files"), treeCard);
         QFont tf = treeTitle->font();
         tf.setBold(true);
         treeTitle->setFont(tf);
@@ -129,6 +134,7 @@ struct TargetInfoWidget::Impl {
         treeLayout->addWidget(treeWidget);
 
         auto emitAnim = [this](QTreeWidgetItem* current) {
+            updateSelectedFileInfo(current);
             if (!current) {
                 emit owner.animationSelected(-1, QString());
                 return;
@@ -162,6 +168,75 @@ struct TargetInfoWidget::Impl {
         });
         layout->addWidget(openFolderBtn);
     }
+
+    void updateSelectedFileInfo(QTreeWidgetItem* current) {
+        if (!current) return;
+        int role = current->data(0, Qt::UserRole).toInt();
+        QString clipPath = current->data(0, Qt::UserRole + 1).toString();
+
+        if (role == -1 || (role < 0 && clipPath.isEmpty())) {
+            // Base model file
+            titleLabel->setText(owner.tr("Converted Model"));
+            QFileInfo fi(baseOutputPath);
+            fileNameLabel->setText(fi.fileName().isEmpty() ? owner.tr("Output") : fi.fileName());
+            formatLabel->setText(baseIsGlb ? owner.tr("glTF 2.0 Binary (.glb)") : owner.tr("Granny 1.2b (.grn)"));
+            qint64 sz = fi.exists() ? fi.size() : 0;
+            sizeLabel->setText(formatFileSize(sz));
+
+            if (baseModel) {
+                size_t totalVerts = 0;
+                size_t totalTris = 0;
+                for (const auto& m : baseModel->meshes) {
+                    totalVerts += m.vertices.size();
+                    totalTris += m.faces.size();
+                }
+                geomLabel->setText(QString("%1 meshes, %2 verts, %3 tris")
+                    .arg(baseModel->meshes.size())
+                    .arg(totalVerts)
+                    .arg(totalTris));
+                rigLabel->setText(QString("%1 bones").arg(baseModel->bones.size()));
+            } else {
+                geomLabel->setText(owner.tr("-"));
+                rigLabel->setText(owner.tr("-"));
+            }
+            validLabel->setText(baseValidationSummary.isEmpty() ? (baseIsGlb ? owner.tr("glTF 2.0 Valid ✓") : owner.tr("Granny 1.2b Valid ✓")) : baseValidationSummary);
+        } else if (role == -2 && !clipPath.isEmpty()) {
+            // Standalone split animation file
+            titleLabel->setText(owner.tr("Converted Animation"));
+            QFileInfo fi(clipPath);
+            fileNameLabel->setText(fi.fileName());
+            formatLabel->setText(owner.tr("Granny 1.2b Animation (.grn)"));
+            qint64 sz = fi.exists() ? fi.size() : 0;
+            sizeLabel->setText(formatFileSize(sz));
+
+            auto animModel = parse_grn_file(fi.filesystemFilePath());
+            if (animModel && !animModel->animations.empty()) {
+                const auto& a = animModel->animations[0];
+                geomLabel->setText(owner.tr("0 meshes (pure animation)"));
+                rigLabel->setText(QString("%1 bones, %2 tracks (%3s)")
+                    .arg(animModel->bones.size())
+                    .arg(a.tracks.size())
+                    .arg(a.duration, 0, 'f', 2));
+                validLabel->setText(owner.tr("Animation Valid ✓"));
+            } else {
+                geomLabel->setText(owner.tr("0 meshes"));
+                rigLabel->setText(owner.tr("Animation Clip"));
+                validLabel->setText(owner.tr("Granny 1.2b Valid ✓"));
+            }
+        } else if (role >= 0 && baseModel && static_cast<size_t>(role) < baseModel->animations.size()) {
+            // Embedded animation track in base model
+            titleLabel->setText(owner.tr("Converted Animation"));
+            const auto& a = baseModel->animations[role];
+            QFileInfo fi(baseOutputPath);
+            QString clipName = QString::fromStdString(a.name.empty() ? ("Animation_" + std::to_string(role)) : a.name);
+            fileNameLabel->setText(QString("%1 [%2]").arg(fi.fileName()).arg(clipName));
+            formatLabel->setText(owner.tr("Embedded Animation Clip"));
+            sizeLabel->setText(QString("Duration: %1s (%2 fps)").arg(a.duration, 0, 'f', 2).arg(a.fps, 0, 'f', 0));
+            geomLabel->setText(QString("Shared with model (%1 meshes)").arg(baseModel->meshes.size()));
+            rigLabel->setText(QString("%1 animated tracks").arg(a.tracks.size()));
+            validLabel->setText(owner.tr("Valid Clip ✓"));
+        }
+    }
 };
 
 TargetInfoWidget::TargetInfoWidget(QWidget* parent)
@@ -189,6 +264,10 @@ void TargetInfoWidget::setConverting(bool converting) {
 
 void TargetInfoWidget::setTargetModel(const GrnModel* model, const QString& outputPath, bool isGlb, const QString& validationSummary) {
     _impl->currentOutputPath = outputPath;
+    _impl->baseModel = model;
+    _impl->baseOutputPath = outputPath;
+    _impl->baseIsGlb = isGlb;
+    _impl->baseValidationSummary = validationSummary;
     _impl->openFolderBtn->setEnabled(!outputPath.isEmpty());
 
     QFileInfo fi(outputPath);
@@ -210,6 +289,7 @@ void TargetInfoWidget::setTargetModel(const GrnModel* model, const QString& outp
             .arg(totalVerts)
             .arg(totalTris));
         _impl->rigLabel->setText(QString("%1 bones").arg(model->bones.size()));
+
     } else {
         _impl->geomLabel->setText(tr("-"));
         _impl->rigLabel->setText(tr("-"));
@@ -241,7 +321,7 @@ void TargetInfoWidget::setTargetModel(const GrnModel* model, const QString& outp
     rootItem->setIcon(0, makeThemedIcon(Icons16::Shape_Cube));
     rootItem->setText(0, fi.fileName().isEmpty() ? tr("Target Model") : fi.fileName());
     rootItem->setData(0, Qt::UserRole, -1);
-    rootItem->setData(0, Qt::UserRole + 1, QString());
+    rootItem->setData(0, Qt::UserRole + 1, outputPath);
     rootItem->setExpanded(true);
 
     bool hasAnims = false;
@@ -259,10 +339,12 @@ void TargetInfoWidget::setTargetModel(const GrnModel* model, const QString& outp
         }
     }
 
-    if (!isGlb && fi.exists()) {
+    if (fi.exists()) {
         QString base = fi.completeBaseName();
         QDir dir = fi.dir();
-        QStringList splitFiles = dir.entryList({ base + "_*.grn", base + "-*.grn" }, QDir::Files, QDir::Name);
+        QString p1 = isGlb ? (base + "_*.glb") : (base + "_*.grn");
+        QString p2 = isGlb ? (base + "-*.glb") : (base + "-*.grn");
+        QStringList splitFiles = dir.entryList({ p1, p2 }, QDir::Files, QDir::Name);
         for (const QString& sf : splitFiles) {
             hasAnims = true;
             auto* animItem = new QTreeWidgetItem(rootItem);
@@ -277,17 +359,18 @@ void TargetInfoWidget::setTargetModel(const GrnModel* model, const QString& outp
         auto* infoItem = new QTreeWidgetItem(rootItem);
         infoItem->setText(0, tr("(No embedded animation clips)"));
         infoItem->setFlags(Qt::NoItemFlags);
-    } else if (rootItem->childCount() > 0) {
-        auto* firstChild = rootItem->child(0);
-        int role = firstChild->data(0, Qt::UserRole).toInt();
-        if (role >= 0 || role == -2) {
-            _impl->treeWidget->setCurrentItem(firstChild);
-        }
     }
+
+    // Select the root item (base model) by default so base metadata is shown first
+    _impl->treeWidget->setCurrentItem(rootItem);
+    _impl->updateSelectedFileInfo(rootItem);
 }
 
 void TargetInfoWidget::clearTarget() {
     _impl->currentOutputPath.clear();
+    _impl->baseModel = nullptr;
+    _impl->baseOutputPath.clear();
+    _impl->titleLabel->setText(tr("Converted Model"));
     _impl->fileNameLabel->setText(tr("None"));
     _impl->formatLabel->setText(tr("-"));
     _impl->sizeLabel->setText(tr("-"));
@@ -312,11 +395,61 @@ void TargetInfoWidget::clearTarget() {
 }
 
 void TargetInfoWidget::selectAnimationItem(int index) {
+    selectAnimation(index, QString());
+}
+
+void TargetInfoWidget::selectAnimation(int animIndex, const QString& clipNameOrPath) {
     if (!_impl->treeWidget) return;
     auto* root = _impl->treeWidget->topLevelItem(0);
     if (!root) return;
-    if (index >= 0 && index < root->childCount()) {
-        _impl->treeWidget->setCurrentItem(root->child(index));
+
+    if (animIndex < 0 && clipNameOrPath.isEmpty()) {
+        _impl->treeWidget->blockSignals(true);
+        _impl->treeWidget->setCurrentItem(root);
+        _impl->treeWidget->blockSignals(false);
+        _impl->updateSelectedFileInfo(root);
+        return;
+    }
+
+    QTreeWidgetItem* matchedChild = nullptr;
+    for (int i = 0; i < root->childCount(); ++i) {
+        auto* child = root->child(i);
+        int role = child->data(0, Qt::UserRole).toInt();
+        QString path = child->data(0, Qt::UserRole + 1).toString();
+        QString text = child->text(0);
+
+        if (animIndex >= 0 && role == animIndex) {
+            matchedChild = child;
+            break;
+        }
+
+        if (!clipNameOrPath.isEmpty() && !path.isEmpty() &&
+            (path.endsWith(clipNameOrPath, Qt::CaseInsensitive) || clipNameOrPath.endsWith(path, Qt::CaseInsensitive))) {
+            matchedChild = child;
+            break;
+        }
+
+        if (!clipNameOrPath.isEmpty()) {
+            QFileInfo fi(clipNameOrPath);
+            QString baseName = fi.completeBaseName();
+            if (text.contains(clipNameOrPath, Qt::CaseInsensitive) ||
+                (!baseName.isEmpty() && text.contains(baseName, Qt::CaseInsensitive))) {
+                matchedChild = child;
+                break;
+            }
+        }
+    }
+
+    if (matchedChild) {
+        _impl->treeWidget->blockSignals(true);
+        _impl->treeWidget->setCurrentItem(matchedChild);
+        _impl->treeWidget->blockSignals(false);
+        _impl->updateSelectedFileInfo(matchedChild);
+    } else {
+        _impl->treeWidget->blockSignals(true);
+        _impl->treeWidget->setCurrentItem(root);
+        _impl->treeWidget->blockSignals(false);
+        _impl->updateSelectedFileInfo(root);
     }
 }
 

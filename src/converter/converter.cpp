@@ -11,6 +11,7 @@
 #include "../codecs/vtex_codec.h"
 #include "../codecs/tga_png.h"
 #include "mesh_optimizer.h"
+#include "anim_optimizer.h"
 #include <algorithm>
 #include <iostream>
 #include <sstream>
@@ -281,6 +282,33 @@ bool convert_file(const std::filesystem::path& input,
                     callback(input.filename().string(), 0.5f, false,
                         "WARNING: Mesh '" + m.name + "' has " + std::to_string(m.vertices.size()) +
                         " vertices (>65,535). Mesh optimizer is OFF: this file will crash Granny 1.2b / Sacred Gold!");
+                }
+            }
+        }
+
+        // Optimize animations (prune static tracks, collapse constant keyframes, decimate redundant linear frames)
+        if (options.optimize_animations && !model->animations.empty()) {
+            AnimOptimizationOptions anim_opt;
+            anim_opt.prune_static_tracks = options.prune_static_tracks;
+            anim_opt.collapse_constant_keyframes = options.collapse_constant_keyframes;
+            anim_opt.decimate_keyframes = options.decimate_keyframes;
+            anim_opt.loop_safe = options.loop_safe_animations;
+            anim_opt.pos_tolerance = options.anim_pos_tolerance;
+            anim_opt.rot_tolerance = options.anim_rot_tolerance;
+            anim_opt.scale_tolerance = options.anim_scale_tolerance;
+            anim_opt.target_fps = options.anim_target_fps;
+            anim_opt.min_rotation_deg = options.anim_min_rotation_deg;
+
+            for (auto& a : model->animations) {
+                auto stats = optimize_animation(a, model->bones, anim_opt);
+                if (stats.optimized_tracks < stats.original_tracks || stats.optimized_keyframes < stats.original_keyframes) {
+                    if (callback) {
+                        callback(input.filename().string(), 0.55f, true,
+                            "Optimized animation '" + a.name + "': tracks " +
+                            std::to_string(stats.original_tracks) + " -> " + std::to_string(stats.optimized_tracks) +
+                            ", keyframes " + std::to_string(stats.original_keyframes) + " -> " +
+                            std::to_string(stats.optimized_keyframes));
+                    }
                 }
             }
         }

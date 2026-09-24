@@ -7,6 +7,7 @@
 #include "gui/main_window.h"
 
 #include <QApplication>
+#include <QScreen>
 #include <oclero/qlementine/style/QlementineStyle.hpp>
 #include <oclero/qlementine/style/ThemeManager.hpp>
 #include <oclero/qlementine/icons/QlementineIcons.hpp>
@@ -35,6 +36,11 @@ int main(int argc, char* argv[]) {
     std::optional<bool> embed_anims_opt;
     std::optional<bool> embed_textures_opt;
     std::optional<int> active_tab_opt;
+    std::optional<int> right_tab_opt;
+    std::optional<int> select_anim_opt;
+    bool skeleton_opt = false;
+    bool labels_opt = false;
+    bool labels_lod_opt = false;
     bool preview_opt = false;
     std::string external_anim;
     for (int i = 1; i < argc; ++i) {
@@ -43,6 +49,15 @@ int main(int argc, char* argv[]) {
             force_gui = true;
         } else if (arg == "--preview") {
             preview_opt = true;
+            force_gui = true;
+        } else if (arg == "--skeleton") {
+            skeleton_opt = true;
+            force_gui = true;
+        } else if (arg == "--labels") {
+            labels_opt = true;
+            force_gui = true;
+        } else if (arg == "--labels-lod") {
+            labels_lod_opt = true;
             force_gui = true;
         } else if (arg == "--screenshot" && i + 1 < argc) {
             screenshot_path = argv[++i];
@@ -66,6 +81,11 @@ int main(int argc, char* argv[]) {
             embed_textures_opt = (std::string(argv[++i]) != "0");
         } else if (arg == "--tab" && i + 1 < argc) {
             active_tab_opt = std::stoi(argv[++i]);
+        } else if (arg == "--right-tab" && i + 1 < argc) {
+            right_tab_opt = std::stoi(argv[++i]);
+        } else if (arg == "--select-anim" && i + 1 < argc) {
+            select_anim_opt = std::stoi(argv[++i]);
+            force_gui = true;
         }
     }
 
@@ -110,12 +130,24 @@ int main(int argc, char* argv[]) {
         if (active_tab_opt.has_value()) {
             window.setActiveTab(*active_tab_opt);
         }
+        if (right_tab_opt.has_value()) {
+            window.setRightTab(*right_tab_opt);
+        }
         if (!external_anim.empty()) {
             window.addExternalAnimation(QString::fromStdString(external_anim));
             window.selectAnimationItem(0);
         }
         if (preview_opt) {
             window.setPreviewVisible(true);
+        }
+        if (skeleton_opt) {
+            window.setShowSkeleton(true);
+        }
+        if (labels_opt) {
+            window.setShowBoneLabels(true);
+        }
+        if (labels_lod_opt) {
+            window.setBoneLabelsLOD(true);
         }
         window.show();
         app.processEvents();
@@ -132,6 +164,16 @@ int main(int argc, char* argv[]) {
                 Sleep(20);
 #endif
             }
+            for (int f = 0; f < 30; ++f) {
+                app.processEvents();
+#ifdef _WIN32
+                Sleep(10);
+#endif
+            }
+        }
+
+        if (select_anim_opt.has_value()) {
+            window.selectAnimationItem(*select_anim_opt);
             for (int f = 0; f < 30; ++f) {
                 app.processEvents();
 #ifdef _WIN32

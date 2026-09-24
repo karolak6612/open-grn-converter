@@ -41,6 +41,16 @@ struct ConversionOptions {
     bool optimize_vertices = false;   /**< Apply quadric error decimation to reduce polygon count. */
     uint32_t decimate_target_verts = 30000; /**< Target vertex budget when decimation is enabled. */
     uint32_t max_vertices_16bit = 64000; /**< Maximum vertex threshold per sub-mesh (default 64000). */
+    bool optimize_animations = true;  /**< Optimize animations to prevent memory exhaustion in viewers/engine. */
+    bool loop_safe_animations = true; /**< Preserve loop boundary keyframes and tangents. */
+    bool prune_static_tracks = true;  /**< Strip animation tracks that match bone rest pose. */
+    bool collapse_constant_keyframes = true; /**< Collapse constant keyframe sequences down to 1 keyframe. */
+    bool decimate_keyframes = false;  /**< Decimate redundant linear keyframes (disabled by default to prevent FK chain distortion). */
+    float anim_pos_tolerance = 0.002f; /**< Position tolerance for animation optimization. */
+    float anim_rot_tolerance = 0.001f; /**< Rotation tolerance for animation optimization. */
+    float anim_scale_tolerance = 0.001f; /**< Scale tolerance for animation optimization. */
+    float anim_target_fps = 0.0f;      /**< Target uniform frame rate (0.0 = preserve original, e.g. 30.0, 20.0, 15.0). */
+    float anim_min_rotation_deg = 0.0f;/**< Minimum rotation range in degrees to retain track (0.0 = keep all, e.g. 3.0). */
 };
 
 /**

@@ -219,4 +219,43 @@ GLuint createMatcapTexture(QOpenGLFunctions_3_3_Core* gl) {
     return texId;
 }
 
+GLuint createUIProgram(QOpenGLFunctions_3_3_Core* gl) {
+    const char* vs = R"(
+        #version 330 core
+        layout(location = 0) in vec2 in_pos;
+        layout(location = 1) in vec2 in_uv;
+        layout(location = 2) in vec4 in_color;
+
+        uniform vec2 u_viewport_size;
+
+        out vec2 v_uv;
+        out vec4 v_color;
+
+        void main() {
+            v_uv = in_uv;
+            v_color = in_color;
+            float ndc_x = (in_pos.x / u_viewport_size.x) * 2.0 - 1.0;
+            float ndc_y = 1.0 - (in_pos.y / u_viewport_size.y) * 2.0;
+            gl_Position = vec4(ndc_x, ndc_y, 0.0, 1.0);
+        }
+    )";
+
+    const char* fs = R"(
+        #version 330 core
+        in vec2 v_uv;
+        in vec4 v_color;
+
+        uniform sampler2D u_atlas;
+
+        out vec4 frag_color;
+
+        void main() {
+            vec4 tex = texture(u_atlas, v_uv);
+            frag_color = vec4(v_color.rgb * tex.rgb, v_color.a * tex.a);
+        }
+    )";
+
+    return linkProgram(gl, vs, fs);
+}
+
 } // namespace grn

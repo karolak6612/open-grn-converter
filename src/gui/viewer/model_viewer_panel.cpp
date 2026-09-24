@@ -23,6 +23,8 @@ struct ModelViewerPanel::Impl {
     QComboBox* shadingCombo{ nullptr };
     QPushButton* wireBtn{ nullptr };
     QPushButton* gridBtn{ nullptr };
+    QPushButton* skeletonBtn{ nullptr };
+    QPushButton* labelsBtn{ nullptr };
     QPushButton* syncCamBtn{ nullptr };
     QPushButton* syncAnimBtn{ nullptr };
     QPushButton* closeBtn{ nullptr };
@@ -115,6 +117,31 @@ struct ModelViewerPanel::Impl {
             targetViewport->setShowGrid(chk);
         });
         headerLayout->addWidget(gridBtn);
+
+        // Skeleton overlay toggle
+        skeletonBtn = new QPushButton(makeThemedIcon(Icons16::Shape_Cube), owner.tr("Skeleton"), &owner);
+        skeletonBtn->setCheckable(true);
+        skeletonBtn->setChecked(false);
+        skeletonBtn->setFixedHeight(24);
+        skeletonBtn->setToolTip(owner.tr("Toggle 3D skeleton bone hierarchy wireframe"));
+        QObject::connect(skeletonBtn, &QPushButton::toggled, &owner, [this](bool chk) {
+            sourceViewport->setShowSkeleton(chk);
+            targetViewport->setShowSkeleton(chk);
+        });
+        headerLayout->addWidget(skeletonBtn);
+
+        // Bone labels toggle
+        labelsBtn = new QPushButton(makeThemedIcon(Icons16::Misc_Tag), owner.tr("Labels"), &owner);
+        labelsBtn->setCheckable(true);
+        labelsBtn->setChecked(false);
+        labelsBtn->setFixedHeight(24);
+        labelsBtn->setToolTip(owner.tr("Toggle projected 2D bone name labels"));
+        QObject::connect(labelsBtn, &QPushButton::toggled, &owner, [this](bool chk) {
+            sourceViewport->setShowBoneLabels(chk);
+            targetViewport->setShowBoneLabels(chk);
+        });
+        headerLayout->addWidget(labelsBtn);
+
         headerLayout->addStretch(1);
 
         // Sync camera toggle
@@ -357,6 +384,33 @@ void ModelViewerPanel::setSyncAnim(bool enabled) {
     if (_impl->syncAnimBtn) {
         _impl->syncAnimBtn->setChecked(enabled);
     }
+}
+
+void ModelViewerPanel::setSelectedBone(int boneIndex) {
+    if (_impl->sourceViewport) _impl->sourceViewport->setSelectedBone(boneIndex);
+    if (_impl->targetViewport) _impl->targetViewport->setSelectedBone(boneIndex);
+}
+
+void ModelViewerPanel::setShowSkeleton(bool enabled) {
+    if (_impl->skeletonBtn) _impl->skeletonBtn->setChecked(enabled);
+    if (_impl->sourceViewport) _impl->sourceViewport->setShowSkeleton(enabled);
+    if (_impl->targetViewport) _impl->targetViewport->setShowSkeleton(enabled);
+}
+
+void ModelViewerPanel::setShowBoneLabels(bool enabled) {
+    if (_impl->labelsBtn) _impl->labelsBtn->setChecked(enabled);
+    if (_impl->sourceViewport) _impl->sourceViewport->setShowBoneLabels(enabled);
+    if (_impl->targetViewport) _impl->targetViewport->setShowBoneLabels(enabled);
+}
+
+void ModelViewerPanel::setBoneLabelsLOD(bool enabled) {
+    if (_impl->sourceViewport) _impl->sourceViewport->setBoneLabelsLOD(enabled);
+    if (_impl->targetViewport) _impl->targetViewport->setBoneLabelsLOD(enabled);
+}
+
+bool ModelViewerPanel::boneLabelsLOD() const {
+    if (_impl->sourceViewport) return _impl->sourceViewport->boneLabelsLOD();
+    return false;
 }
 
 ViewportWidget* ModelViewerPanel::sourceViewport() const {

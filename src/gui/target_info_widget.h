@@ -19,6 +19,7 @@ public:
     void clearTarget();
 
     void selectAnimationItem(int index);
+    void selectAnimation(int animIndex, const QString& clipNameOrPath = QString());
     void markOutdated(bool outdated = true);
 
 signals:

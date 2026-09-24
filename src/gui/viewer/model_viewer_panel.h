@@ -35,6 +35,11 @@ public:
     void setComparisonLayout(ComparisonLayout layout);
     bool isSyncAnim() const;
     void setSyncAnim(bool enabled);
+    void setSelectedBone(int boneIndex);
+    void setShowSkeleton(bool enabled);
+    void setShowBoneLabels(bool enabled);
+    void setBoneLabelsLOD(bool enabled);
+    bool boneLabelsLOD() const;
 
     ViewportWidget* sourceViewport() const;
     ViewportWidget* targetViewport() const;

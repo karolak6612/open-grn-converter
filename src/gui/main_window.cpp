@@ -7,10 +7,12 @@
 #include "gui_utils.h"
 #include "source_info_widget.h"
 #include "target_info_widget.h"
+#include "bone_inspector_widget.h"
 #include "viewer/model_viewer_panel.h"
 #include "viewer/viewport_widget.h"
 #include "../core/grn_parser.h"
 #include "../gltf/glb_reader.h"
+#include <QTabWidget>
 
 #include <oclero/qlementine/style/QlementineStyle.hpp>
 #include <oclero/qlementine/style/ThemeManager.hpp>
@@ -61,7 +63,9 @@ struct MainWindow::Impl {
     QWidget* converterPanel{ nullptr };
     ModelViewerPanel* modelViewer{ nullptr };
     SourceInfoWidget* sourceInfoWidget{ nullptr };
+    QTabWidget* rightTabs{ nullptr };
     TargetInfoWidget* targetInfoWidget{ nullptr };
+    BoneInspectorWidget* boneInspectorWidget{ nullptr };
     QAction* previewAction{ nullptr };
     QToolButton* previewToggleBtn{ nullptr };
     QPointer<QDialog> detachedDialog;
@@ -163,6 +167,26 @@ struct MainWindow::Impl {
         });
         previewAction->setCheckable(true);
         previewAction->setChecked(true);
+
+        viewMenu->addSeparator();
+
+        auto* skelAction = viewMenu->addAction(owner.tr("Show &Skeleton"), [this](bool chk) {
+            owner.setShowSkeleton(chk);
+        });
+        skelAction->setCheckable(true);
+        skelAction->setChecked(false);
+
+        auto* labelsAction = viewMenu->addAction(owner.tr("Show Bone &Labels"), [this](bool chk) {
+            owner.setShowBoneLabels(chk);
+        });
+        labelsAction->setCheckable(true);
+        labelsAction->setChecked(false);
+
+        auto* lodAction = viewMenu->addAction(owner.tr("Bone Labels &LOD (Declutter)"), [this](bool chk) {
+            owner.setBoneLabelsLOD(chk);
+        });
+        lodAction->setCheckable(true);
+        lodAction->setChecked(false); // default OFF: labels now work fine with GPU batching!
 
         auto* helpMenu = menuBar->addMenu(owner.tr("&Help"));
         helpMenu->addAction(makeThemedIcon(Icons16::Misc_Help), owner.tr("&About GRN Converter..."), [this]() {
@@ -438,18 +462,29 @@ struct MainWindow::Impl {
             detachPreview();
         });
 
-        targetInfoWidget = new TargetInfoWidget(&owner);
-        targetInfoWidget->setMinimumWidth(240);
-        targetInfoWidget->setMaximumWidth(360);
+        rightTabs = new QTabWidget(&owner);
+        rightTabs->setMinimumWidth(260);
+        rightTabs->setMaximumWidth(650);
+
+        targetInfoWidget = new TargetInfoWidget(rightTabs);
         QObject::connect(targetInfoWidget, &TargetInfoWidget::animationSelected, &owner, [this](int animIndex, const QString& clipPath) {
             onTargetAnimationSelected(animIndex, clipPath);
         });
+        rightTabs->addTab(targetInfoWidget, makeThemedIcon(Icons16::Misc_Info), owner.tr("Overview"));
+
+        boneInspectorWidget = new BoneInspectorWidget(rightTabs);
+        QObject::connect(boneInspectorWidget, &BoneInspectorWidget::boneSelected, &owner, [this](int boneIdx, bool /*isSource*/) {
+            if (modelViewer) {
+                modelViewer->setSelectedBone(boneIdx);
+            }
+        });
+        rightTabs->addTab(boneInspectorWidget, makeThemedIcon(Icons16::Misc_ItemsTree), owner.tr("Bone Inspector"));
 
         mainSplitter = new QSplitter(Qt::Horizontal, &owner);
         mainSplitter->setHandleWidth(4);
         mainSplitter->addWidget(converterPanel);
         mainSplitter->addWidget(modelViewer);
-        mainSplitter->addWidget(targetInfoWidget);
+        mainSplitter->addWidget(rightTabs);
         mainSplitter->setCollapsible(0, false);
         mainSplitter->setCollapsible(1, false);
         mainSplitter->setCollapsible(2, true);
@@ -515,6 +550,9 @@ struct MainWindow::Impl {
         if (targetInfoWidget) {
             targetInfoWidget->clearTarget();
         }
+        if (boneInspectorWidget) {
+            boneInspectorWidget->clear();
+        }
         if (modelViewer) {
             modelViewer->loadTargetModel(nullptr, QString());
         }
@@ -541,6 +579,9 @@ struct MainWindow::Impl {
             if (sourceInfoWidget) {
                 sourceInfoWidget->setSourceModel(&*loadedModel, path, isGrn);
             }
+            if (boneInspectorWidget) {
+                boneInspectorWidget->setSourceModel(&*loadedModel);
+            }
             if (glbOptions) {
                 glbOptions->setModelAnalysis(isGrn ? nullptr : &*loadedModel);
             }
@@ -548,6 +589,9 @@ struct MainWindow::Impl {
             modelViewer->loadSourceModel(nullptr, QString());
             if (sourceInfoWidget) {
                 sourceInfoWidget->clearSource();
+            }
+            if (boneInspectorWidget) {
+                boneInspectorWidget->setSourceModel(nullptr);
             }
             if (glbOptions) {
                 glbOptions->setModelAnalysis(nullptr);
@@ -601,7 +645,7 @@ struct MainWindow::Impl {
             owner.setMaximumWidth(QWIDGETSIZE_MAX);
             converterPanel->setMaximumWidth(420);
             modelViewer->setVisible(true);
-            targetInfoWidget->setVisible(true);
+            if (rightTabs) rightTabs->setVisible(true);
             mainSplitter->setSizes({ 360, 600, 320 });
             owner.resize(1280, owner.height());
             if (loadedModel) {
@@ -614,7 +658,7 @@ struct MainWindow::Impl {
             }
         } else {
             modelViewer->setVisible(false);
-            targetInfoWidget->setVisible(false);
+            if (rightTabs) rightTabs->setVisible(false);
             converterPanel->setMaximumWidth(QWIDGETSIZE_MAX);
             owner.setMinimumSize(360, 600);
             owner.resize(400, owner.height());
@@ -649,6 +693,10 @@ struct MainWindow::Impl {
             const auto& a = loadedModel->animations[internalAnimIndex];
             modelViewer->playSourceAnimation(&a, QString::fromStdString(a.name));
 
+            if (targetInfoWidget) {
+                targetInfoWidget->selectAnimation(internalAnimIndex, QString::fromStdString(a.name));
+            }
+
             if (convertedModel) {
                 bool found = false;
                 for (const auto& ta : convertedModel->animations) {
@@ -671,6 +719,10 @@ struct MainWindow::Impl {
                 const auto& a = cachedExternalAnimModel->animations[0];
                 modelViewer->playSourceAnimation(&a, QFileInfo(animPath).fileName());
 
+                if (targetInfoWidget) {
+                    targetInfoWidget->selectAnimation(-2, QFileInfo(animPath).fileName());
+                }
+
                 if (convertedModel) {
                     for (const auto& ta : convertedModel->animations) {
                         if (ta.name == a.name) {
@@ -684,12 +736,19 @@ struct MainWindow::Impl {
         }
 
         modelViewer->stopAnimation();
+        if (targetInfoWidget) {
+            targetInfoWidget->selectAnimation(-1, QString());
+        }
     }
 
     void onGlbAnimationSelected(int animIndex) {
         if (animIndex >= 0 && loadedModel && static_cast<size_t>(animIndex) < loadedModel->animations.size()) {
             const auto& a = loadedModel->animations[animIndex];
             modelViewer->playSourceAnimation(&a, QString::fromStdString(a.name));
+
+            if (targetInfoWidget) {
+                targetInfoWidget->selectAnimation(animIndex, QString::fromStdString(a.name));
+            }
 
             if (convertedModel) {
                 bool found = false;
@@ -706,6 +765,9 @@ struct MainWindow::Impl {
             }
         } else {
             modelViewer->stopAnimation();
+            if (targetInfoWidget) {
+                targetInfoWidget->selectAnimation(-1, QString());
+            }
         }
     }
 
@@ -727,6 +789,8 @@ struct MainWindow::Impl {
                     modelViewer->playSourceAnimation(&loadedModel->animations[animIndex], QString());
                 }
             }
+            if (grnOptions) grnOptions->selectAnimationItem(animIndex);
+            if (glbOptions) glbOptions->selectAnimationItem(animIndex);
         } else if (!clipPath.isEmpty()) {
             cachedExternalAnimModel = parse_grn_file(std::filesystem::path(clipPath.toStdWString()));
             if (cachedExternalAnimModel && !cachedExternalAnimModel->animations.empty()) {
@@ -735,22 +799,29 @@ struct MainWindow::Impl {
 
                 if (loadedModel && !loadedModel->animations.empty()) {
                     bool found = false;
-                    for (const auto& sa : loadedModel->animations) {
+                    for (size_t si = 0; si < loadedModel->animations.size(); ++si) {
+                        const auto& sa = loadedModel->animations[si];
                         if (sa.name == a.name ||
                             sa.name.ends_with(a.name) ||
                             a.name.ends_with(sa.name)) {
                             modelViewer->playSourceAnimation(&sa, QString::fromStdString(sa.name));
+                            if (grnOptions) grnOptions->selectAnimationItem(static_cast<int>(si));
+                            if (glbOptions) glbOptions->selectAnimationItem(static_cast<int>(si));
                             found = true;
                             break;
                         }
                     }
                     if (!found && loadedModel->animations.size() == 1) {
                         modelViewer->playSourceAnimation(&loadedModel->animations[0], QString::fromStdString(loadedModel->animations[0].name));
+                        if (grnOptions) grnOptions->selectAnimationItem(0);
+                        if (glbOptions) glbOptions->selectAnimationItem(0);
                     }
                 }
             }
         } else {
             modelViewer->stopAnimation();
+            if (grnOptions) grnOptions->selectAnimationItem(-1);
+            if (glbOptions) glbOptions->selectAnimationItem(-1);
         }
     }
 
@@ -853,9 +924,11 @@ struct MainWindow::Impl {
             }
             opts.vtex_enabled = glbOptions->compressVTex();
             opts.split_animations = glbOptions->splitAnimations();
+            opts.optimize_animations = glbOptions->isAnimOptimizerEnabled();
             opts.auto_split_16bit = glbOptions->autoSplit16Bit();
-            opts.optimize_vertices = glbOptions->decimateEnabled();
-            opts.decimate_target_verts = glbOptions->targetMaxVertices();
+            opts.anim_target_fps = glbOptions->animTargetFps();
+            opts.anim_min_rotation_deg = glbOptions->animMinRotationDeg();
+            opts.loop_safe_animations = glbOptions->animLoopSafe();
             opts.max_vertices_16bit = 64000;
         }
 
@@ -898,12 +971,21 @@ struct MainWindow::Impl {
                 if (convertedModel) {
                     modelViewer->loadTargetModel(&*convertedModel, fi.fileName());
                     targetInfoWidget->setTargetModel(&*convertedModel, lastOutputPath, isGrnToGlb);
+                    if (boneInspectorWidget) {
+                        boneInspectorWidget->setTargetModel(&*convertedModel);
+                    }
                 } else {
                     targetInfoWidget->setTargetModel(nullptr, lastOutputPath, isGrnToGlb);
+                    if (boneInspectorWidget) {
+                        boneInspectorWidget->setTargetModel(nullptr);
+                    }
                 }
             }
         } else if (!ok) {
             targetInfoWidget->clearTarget();
+            if (boneInspectorWidget) {
+                boneInspectorWidget->setTargetModel(nullptr);
+            }
         }
     }
 };
@@ -948,6 +1030,37 @@ void MainWindow::setActiveTab(int index) {
     _impl->navBar->setCurrentIndex(index);
 }
 
+void MainWindow::setRightTab(int index) {
+    if (_impl->rightTabs) {
+        _impl->rightTabs->setCurrentIndex(index);
+    }
+}
+
+void MainWindow::setShowSkeleton(bool show) {
+    if (_impl->modelViewer) {
+        _impl->modelViewer->setShowSkeleton(show);
+    }
+}
+
+void MainWindow::setShowBoneLabels(bool show) {
+    if (_impl->modelViewer) {
+        _impl->modelViewer->setShowBoneLabels(show);
+    }
+}
+
+void MainWindow::setBoneLabelsLOD(bool enabled) {
+    if (_impl->modelViewer) {
+        _impl->modelViewer->setBoneLabelsLOD(enabled);
+    }
+}
+
+bool MainWindow::boneLabelsLOD() const {
+    if (_impl->modelViewer) {
+        return _impl->modelViewer->boneLabelsLOD();
+    }
+    return false;
+}
+
 void MainWindow::dragEnterEvent(QDragEnterEvent* event) {
     if (event->mimeData()->hasUrls()) {
         event->acceptProposedAction();
@@ -985,7 +1098,12 @@ void MainWindow::addExternalAnimation(const QString& path) {
 }
 
 void MainWindow::selectAnimationItem(int index) {
-    _impl->grnOptions->selectAnimationItem(index);
+    if (_impl->navBar->currentIndex() == 0) {
+        _impl->grnOptions->selectAnimationItem(index);
+    } else {
+        _impl->glbOptions->selectAnimationItem(index);
+        _impl->onGlbAnimationSelected(index);
+    }
 }
 
 } // namespace grn

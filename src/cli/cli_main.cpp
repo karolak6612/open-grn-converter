@@ -24,6 +24,10 @@ static void print_help() {
               << "  --anim <path>            External animation .grn track to merge into output model (can repeat)\n"
               << "  --split-anims            Split GLB animations into separate .grn files (default)\n"
               << "  --no-split-anims         Keep all GLB animations embedded into a single .grn file\n"
+              << "  --anim-optimizer         Enable animation optimizer (prune static tracks, collapse keyframes) (default)\n"
+              << "  --no-anim-optimizer      Disable animation optimizer\n"
+              << "  --anim-fps <val>         Target uniform animation frame rate (e.g. 30, 20, 15; default 0 = source)\n"
+              << "  --anim-min-deg <val>     Prune tracks with rotation movement < angle in degrees (e.g. 3.0)\n"
               << "  --optimizer              Enable 16-bit vertex partitioner when converting GLB to GRN (default)\n"
               << "  --no-optimizer           Disable 16-bit vertex partitioner (can cause in-game crash if >65k verts)\n"
               << "  --tint-pink              Test feature: apply pink tint filter to textures\n"
@@ -69,6 +73,14 @@ int run_cli(int argc, char* argv[]) {
             options.split_animations = true;
         } else if (arg == "--no-split-anims") {
             options.split_animations = false;
+        } else if (arg == "--anim-optimizer" || arg == "--optimize-anims") {
+            options.optimize_animations = true;
+        } else if (arg == "--no-anim-optimizer" || arg == "--no-optimize-anims") {
+            options.optimize_animations = false;
+        } else if (arg == "--anim-fps" && i + 1 < argc) {
+            options.anim_target_fps = std::stof(argv[++i]);
+        } else if (arg == "--anim-min-deg" && i + 1 < argc) {
+            options.anim_min_rotation_deg = std::stof(argv[++i]);
         } else if (arg == "--no-optimizer" || arg == "--no-split-16bit") {
             options.auto_split_16bit = false;
         } else if (arg == "--optimizer" || arg == "--split-16bit") {
