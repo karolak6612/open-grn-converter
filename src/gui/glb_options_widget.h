@@ -36,6 +36,7 @@ public:
     void setAnimLoopSafe(bool safe);
     void setModelAnalysis(const struct GrnModel* model);
     void selectAnimationItem(int index);
+    void reemitCurrentAnimation();
     void reset();
 
 signals:

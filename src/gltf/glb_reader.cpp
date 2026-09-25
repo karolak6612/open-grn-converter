@@ -730,6 +730,9 @@ std::optional<GrnModel> load_glb_memory(const uint8_t* data, size_t size, const 
             track.channel_id = joint_idx + 1;
             track.bone_name = model.bones[joint_idx].name;
             track.format = "split";
+            track.position_interp_mode = 1;
+            track.quaternion_interp_mode = 1;
+            track.scale_shear_interp_mode = 1;
             bool is_root = (model.bones[joint_idx].parent_index < 0);
 
             for (const auto* ch : ch_list) {
@@ -745,9 +748,18 @@ std::optional<GrnModel> load_glb_memory(const uint8_t* data, size_t size, const 
                     max_dur = std::max(max_dur, t);
                 }
 
-                bool is_cubic = (samp->interpolation == cgltf_interpolation_type_cubic_spline);
+                uint32_t interp_mode = 1;
+                if (samp->interpolation == cgltf_interpolation_type_cubic_spline) {
+                    interp_mode = 3;
+                } else if (samp->interpolation == cgltf_interpolation_type_step) {
+                    interp_mode = 0;
+                } else {
+                    interp_mode = 1;
+                }
+                bool is_cubic = (interp_mode == 3);
 
                 if (ch->target_path == cgltf_animation_path_type_translation) {
+                    track.position_interp_mode = interp_mode;
                     track.translation_times = times;
                     size_t stride = is_cubic ? 9 : 3;
                     size_t off = is_cubic ? 3 : 0;
@@ -772,6 +784,7 @@ std::optional<GrnModel> load_glb_memory(const uint8_t* data, size_t size, const 
                         track.translations.push_back({tx, ty, tz});
                     }
                 } else if (ch->target_path == cgltf_animation_path_type_rotation) {
+                    track.quaternion_interp_mode = interp_mode;
                     track.rotation_times = times;
                     size_t stride = is_cubic ? 12 : 4;
                     size_t off = is_cubic ? 4 : 0;
@@ -797,6 +810,7 @@ std::optional<GrnModel> load_glb_memory(const uint8_t* data, size_t size, const 
                         track.rotations.push_back(r);
                     }
                 } else if (ch->target_path == cgltf_animation_path_type_scale) {
+                    track.scale_shear_interp_mode = interp_mode;
                     track.scale_shear_times = times;
                     size_t stride = is_cubic ? 9 : 3;
                     size_t off = is_cubic ? 3 : 0;
@@ -835,21 +849,21 @@ std::optional<GrnModel> load_glb_memory(const uint8_t* data, size_t size, const 
             auto it = existing_tracks.find(ch_id);
             if (it != existing_tracks.end()) {
                 auto& trk = anim.tracks[it->second];
-                trk.position_interp_mode = 2;
-                trk.quaternion_interp_mode = 2;
-                trk.scale_shear_interp_mode = 1;
 
                 if (trk.translations.empty()) {
                     trk.translation_times = {0.0f, clip_dur};
                     trk.translations = {model.bones[bi].position, model.bones[bi].position};
+                    trk.position_interp_mode = 1;
                 }
                 if (trk.rotations.empty()) {
                     trk.rotation_times = {0.0f, clip_dur};
                     trk.rotations = {model.bones[bi].rotation, model.bones[bi].rotation};
+                    trk.quaternion_interp_mode = 1;
                 }
                 if (trk.scale_shears.empty()) {
                     trk.scale_shear_times = {0.0f, clip_dur};
                     trk.scale_shears = {model.bones[bi].scale_3x3, model.bones[bi].scale_3x3};
+                    trk.scale_shear_interp_mode = 1;
                 }
             } else {
                 // Add static track for un-animated bone
@@ -857,8 +871,8 @@ std::optional<GrnModel> load_glb_memory(const uint8_t* data, size_t size, const 
                 trk.channel_id = ch_id;
                 trk.bone_name = model.bones[bi].name;
                 trk.format = "split";
-                trk.position_interp_mode = 2;
-                trk.quaternion_interp_mode = 2;
+                trk.position_interp_mode = 1;
+                trk.quaternion_interp_mode = 1;
                 trk.scale_shear_interp_mode = 1;
                 trk.translation_times = {0.0f, clip_dur};
                 trk.translations = {model.bones[bi].position, model.bones[bi].position};

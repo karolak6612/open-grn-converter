@@ -26,9 +26,11 @@ public:
     void loadTargetModel(const GrnModel* model, const QString& title = QString(), bool isZUp = false);
     void loadModel(const GrnModel* model, const QString& title = QString(), bool isZUp = false) { loadSourceModel(model, title, isZUp); }
 
-    void playSourceAnimation(const GrnAnimation* anim, const QString& animTitle = QString());
-    void playTargetAnimation(const GrnAnimation* anim, const QString& animTitle = QString());
-    void playAnimation(const GrnAnimation* anim, const QString& animTitle = QString());
+    void playSourceAnimation(const GrnAnimation* anim, const QString& animTitle = QString(), const std::vector<GrnBone>* animBones = nullptr);
+    void playTargetAnimation(const GrnAnimation* anim, const QString& animTitle = QString(), const std::vector<GrnBone>* animBones = nullptr);
+    void playAnimation(const GrnAnimation* anim, const QString& animTitle = QString(), const std::vector<GrnBone>* animBones = nullptr);
+    void stopSourceAnimation();
+    void stopTargetAnimation();
     void stopAnimation();
 
     void setModelScale(float s);

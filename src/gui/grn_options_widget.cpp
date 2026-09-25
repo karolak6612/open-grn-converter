@@ -435,6 +435,24 @@ void GrnOptionsWidget::selectAnimationItem(int index) {
     }
 }
 
+void GrnOptionsWidget::reemitCurrentAnimation() {
+    if (!_impl->treeWidget) return;
+    auto* cur = _impl->treeWidget->currentItem();
+    if (!cur) {
+        auto* root = _impl->treeWidget->topLevelItem(0);
+        if (root && root->childCount() > 0) {
+            cur = root->child(0);
+            _impl->treeWidget->setCurrentItem(cur);
+            return;
+        }
+    }
+    if (cur) {
+        QString animPath = cur->data(0, Qt::UserRole).toString();
+        int intIdx = cur->data(0, Qt::UserRole + 1).isValid() ? cur->data(0, Qt::UserRole + 1).toInt() : -1;
+        emit animationSelected(animPath, intIdx);
+    }
+}
+
 void GrnOptionsWidget::setEmbedTextures(bool embed) {
     _impl->embedTexSwitch->setChecked(embed);
     _impl->looseFmtCombo->setEnabled(!embed);

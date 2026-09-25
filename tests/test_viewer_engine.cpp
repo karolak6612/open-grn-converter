@@ -7,6 +7,7 @@
 #include "core/grn_types.h"
 #include "core/grn_parser.h"
 #include "gltf/glb_reader.h"
+#include "converter/converter.h"
 #include "gui/viewer/camera.h"
 #include "gui/viewer/grn_anim_sampler.h"
 #include "gui/viewer/skinning_engine.h"
@@ -404,6 +405,61 @@ static void test_bone_labels() {
     std::cout << "  -> Bone labels passed (" << placed << " non-overlapping badges placed)" << std::endl;
 }
 
+static void test_wolf_glb_viewer() {
+    std::cout << "[TEST] Wolf GLB Skinning in Viewer ..." << std::endl;
+    fs::path wolfGlb = "E:/Sacred_Unpacked/wolf/0016_WOLF.glb";
+    if (!fs::exists(wolfGlb)) {
+        wolfGlb = "test_eval.glb";
+    }
+    if (!fs::exists(wolfGlb)) return;
+
+    grn::GlbImportOptions glbOpts;
+    glbOpts.y_up = false;
+    auto modelOpt = grn::load_glb_file(wolfGlb, glbOpts);
+    assert(modelOpt.has_value());
+    auto& model = *modelOpt;
+
+    grn::SkinningEngine engine;
+    engine.setModel(&model);
+    engine.evaluate(0.0f);
+    QVector3D minB, maxB;
+    engine.computeBounds(minB, maxB);
+    std::cout << "  Rest pose bounds: min=(" << minB.x() << ", " << minB.y() << ", " << minB.z() << ") "
+              << "max=(" << maxB.x() << ", " << maxB.y() << ", " << maxB.z() << ")" << std::endl;
+
+    if (!model.animations.empty()) {
+        engine.setAnimation(&model.animations[0]);
+        for (float t : {0.0f, 0.04f, 0.5f}) {
+            engine.evaluate(t);
+            engine.computeBounds(minB, maxB);
+            std::cout << "  Anim t=" << t << " bounds: min=(" << minB.x() << ", " << minB.y() << ", " << minB.z() << ") "
+                      << "max=(" << maxB.x() << ", " << maxB.y() << ", " << maxB.z() << ")" << std::endl;
+            const auto& pos = engine.skinnedPositions();
+            for (size_t mi = 0; mi < pos.size(); ++mi) {
+                for (size_t vi = 0; vi < pos[mi].size(); ++vi) {
+                    const auto& v = pos[mi][vi];
+                    if (v.y() < -5.0f || (v - QVector3D(0, 20, 0)).length() > 100.0f) {
+                        std::cout << "    Spike at vert " << vi << ": (" << v.x() << ", " << v.y() << ", " << v.z() << ")" << std::endl;
+                        if (vi < model.meshes[mi].weights.size()) {
+                            const auto& w = model.meshes[mi].weights[vi];
+                            for (size_t k = 0; k < w.bone_indices.size(); ++k) {
+                                int localB = w.bone_indices[k];
+                                int bIdx = localB;
+                                if (!model.meshes[mi].bone_index_map.empty() && localB >= 0 && static_cast<size_t>(localB) < model.meshes[mi].bone_index_map.size()) {
+                                    bIdx = model.meshes[mi].bone_index_map[localB];
+                                }
+                                std::string bName = (bIdx >= 0 && static_cast<size_t>(bIdx) < model.bones.size()) ? model.bones[bIdx].name : "UNKNOWN";
+                                std::cout << "      Bone " << bIdx << " ('" << bName << "') wt=" << (k < w.bone_weights.size() ? w.bone_weights[k] : 0.0f) << std::endl;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+}
+
 int main(int argc, char* argv[]) {
     QGuiApplication app(argc, argv);
     try {
@@ -413,6 +469,7 @@ int main(int argc, char* argv[]) {
         test_viewer_real_assets();
         test_skinning_engine_scale();
         test_bone_labels();
+        test_wolf_glb_viewer();
         std::cout << "\nALL VIEWER ENGINE TESTS PASSED!" << std::endl;
         return 0;
     } catch (const std::exception& ex) {

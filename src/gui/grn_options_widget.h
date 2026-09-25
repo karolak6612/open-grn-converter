@@ -28,6 +28,7 @@ public:
     void addExternalAnimFile(const QString& path);
     void clearExternalAnims();
     void selectAnimationItem(int index);
+    void reemitCurrentAnimation();
 
     void setConvertCoordinates(bool convert);
     void setEmbedTextures(bool embed);

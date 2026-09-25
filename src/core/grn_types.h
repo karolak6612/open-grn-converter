@@ -11,6 +11,9 @@
 #include <array>
 #include <optional>
 #include <memory>
+#include <cmath>
+#include <algorithm>
+#include <utility>
 
 namespace grn {
 
@@ -119,6 +122,204 @@ struct Mat4x4 {
         return res;
     }
 };
+
+struct Mat3x3 {
+    std::array<float, 9> m{1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f};
+
+    Mat3x3() = default;
+    constexpr Mat3x3(const std::array<float, 9>& arr) : m(arr) {}
+    constexpr Mat3x3(float m00, float m01, float m02,
+                     float m10, float m11, float m12,
+                     float m20, float m21, float m22)
+        : m{m00, m01, m02, m10, m11, m12, m20, m21, m22} {}
+
+    static Mat3x3 identity() {
+        return Mat3x3{};
+    }
+
+    float operator()(int r, int c) const { return m[r * 3 + c]; }
+    float& operator()(int r, int c) { return m[r * 3 + c]; }
+
+    Mat3x3 operator*(const Mat3x3& o) const {
+        Mat3x3 res{};
+        for (int r = 0; r < 3; ++r) {
+            for (int c = 0; c < 3; ++c) {
+                res(r, c) = (*this)(r, 0) * o(0, c) +
+                            (*this)(r, 1) * o(1, c) +
+                            (*this)(r, 2) * o(2, c);
+            }
+        }
+        return res;
+    }
+
+    Vec3 operator*(const Vec3& v) const {
+        return {
+            m[0] * v.x + m[1] * v.y + m[2] * v.z,
+            m[3] * v.x + m[4] * v.y + m[5] * v.z,
+            m[6] * v.x + m[7] * v.y + m[8] * v.z
+        };
+    }
+
+    Vec3 transform(const Vec3& v) const {
+        return (*this) * v;
+    }
+
+    Mat3x3 transposed() const {
+        return {
+            m[0], m[3], m[6],
+            m[1], m[4], m[7],
+            m[2], m[5], m[8]
+        };
+    }
+
+    Mat3x3 transpose() const {
+        return transposed();
+    }
+
+    float determinant() const {
+        return m[0] * (m[4] * m[8] - m[5] * m[7]) -
+               m[1] * (m[3] * m[8] - m[5] * m[6]) +
+               m[2] * (m[3] * m[7] - m[4] * m[6]);
+    }
+
+    Mat3x3 inverted() const {
+        float det = determinant();
+        if (std::abs(det) < 1e-12f) return Mat3x3::identity();
+        float invDet = 1.0f / det;
+        return {
+            (m[4] * m[8] - m[5] * m[7]) * invDet,
+            (m[2] * m[7] - m[1] * m[8]) * invDet,
+            (m[1] * m[5] - m[2] * m[4]) * invDet,
+
+            (m[5] * m[6] - m[3] * m[8]) * invDet,
+            (m[0] * m[8] - m[2] * m[6]) * invDet,
+            (m[2] * m[3] - m[0] * m[5]) * invDet,
+
+            (m[3] * m[7] - m[4] * m[6]) * invDet,
+            (m[1] * m[6] - m[0] * m[7]) * invDet,
+            (m[0] * m[4] - m[1] * m[3]) * invDet
+        };
+    }
+};
+
+inline Mat3x3 quat_to_mat3(const Vec4& q) {
+    float qx = q.x, qy = q.y, qz = q.z, qw = q.w;
+    float lenSq = qx * qx + qy * qy + qz * qz + qw * qw;
+    if (lenSq > 1e-8f) {
+        float inv = 1.0f / std::sqrt(lenSq);
+        qx *= inv; qy *= inv; qz *= inv; qw *= inv;
+    } else {
+        return Mat3x3::identity();
+    }
+    float xx = qx * qx, yy = qy * qy, zz = qz * qz;
+    float xy = qx * qy, xz = qx * qz, yz = qy * qz;
+    float wx = qw * qx, wy = qw * qy, wz = qw * qz;
+
+    return {
+        1.0f - 2.0f * (yy + zz), 2.0f * (xy - wz),        2.0f * (xz + wy),
+        2.0f * (xy + wz),        1.0f - 2.0f * (xx + zz), 2.0f * (yz - wx),
+        2.0f * (xz - wy),        2.0f * (yz + wx),        1.0f - 2.0f * (xx + yy)
+    };
+}
+
+inline Vec4 mat3_to_quat(const Mat3x3& R) {
+    float tr = R(0, 0) + R(1, 1) + R(2, 2);
+    Vec4 q;
+    if (tr > 0.0f) {
+        float s = 0.5f / std::sqrt(tr + 1.0f);
+        q.w = 0.25f / s;
+        q.x = (R(2, 1) - R(1, 2)) * s;
+        q.y = (R(0, 2) - R(2, 0)) * s;
+        q.z = (R(1, 0) - R(0, 1)) * s;
+    } else if (R(0, 0) > R(1, 1) && R(0, 0) > R(2, 2)) {
+        float s = 2.0f * std::sqrt(std::max(0.0f, 1.0f + R(0, 0) - R(1, 1) - R(2, 2)));
+        if (s > 1e-8f) {
+            q.w = (R(2, 1) - R(1, 2)) / s;
+            q.x = 0.25f * s;
+            q.y = (R(0, 1) + R(1, 0)) / s;
+            q.z = (R(0, 2) + R(2, 0)) / s;
+        } else {
+            q = {1.0f, 0.0f, 0.0f, 0.0f};
+        }
+    } else if (R(1, 1) > R(2, 2)) {
+        float s = 2.0f * std::sqrt(std::max(0.0f, 1.0f + R(1, 1) - R(0, 0) - R(2, 2)));
+        if (s > 1e-8f) {
+            q.w = (R(0, 2) - R(2, 0)) / s;
+            q.x = (R(0, 1) + R(1, 0)) / s;
+            q.y = 0.25f * s;
+            q.z = (R(1, 2) + R(2, 1)) / s;
+        } else {
+            q = {0.0f, 1.0f, 0.0f, 0.0f};
+        }
+    } else {
+        float s = 2.0f * std::sqrt(std::max(0.0f, 1.0f + R(2, 2) - R(0, 0) - R(1, 1)));
+        if (s > 1e-8f) {
+            q.w = (R(1, 0) - R(0, 1)) / s;
+            q.x = (R(0, 2) + R(2, 0)) / s;
+            q.y = (R(1, 2) + R(2, 1)) / s;
+            q.z = 0.25f * s;
+        } else {
+            q = {0.0f, 0.0f, 1.0f, 0.0f};
+        }
+    }
+    float len = std::sqrt(q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w);
+    if (len > 1e-8f) {
+        q.x /= len; q.y /= len; q.z /= len; q.w /= len;
+    } else {
+        q = {0.0f, 0.0f, 0.0f, 1.0f};
+    }
+    return q;
+}
+
+inline void jacobi_sym3(const Mat3x3& A_in, Vec3& out_eigvals, Mat3x3& out_V) {
+    Mat3x3 A = A_in;
+    // Symmetrize input
+    A(0, 1) = A(1, 0) = 0.5f * (A(0, 1) + A(1, 0));
+    A(0, 2) = A(2, 0) = 0.5f * (A(0, 2) + A(2, 0));
+    A(1, 2) = A(2, 1) = 0.5f * (A(1, 2) + A(2, 1));
+
+    out_V = Mat3x3::identity();
+
+    for (int iter = 0; iter < 20; ++iter) {
+        float off_max = std::max({std::abs(A(0, 1)), std::abs(A(0, 2)), std::abs(A(1, 2))});
+        if (off_max < 1e-7f) break;
+
+        const std::pair<int, int> pairs[3] = {{0, 1}, {0, 2}, {1, 2}};
+        for (const auto& [p, q] : pairs) {
+            if (std::abs(A(p, q)) < 1e-9f) continue;
+            float tau = (A(q, q) - A(p, p)) / (2.0f * A(p, q));
+            float t = (tau >= 0.0f) ? (1.0f / (tau + std::sqrt(1.0f + tau * tau)))
+                                    : (-1.0f / (-tau + std::sqrt(1.0f + tau * tau)));
+            float c = 1.0f / std::sqrt(1.0f + t * t);
+            float s = t * c;
+
+            float App = A(p, p), Aqq = A(q, q), Apq = A(p, q);
+            A(p, p) = c * c * App - 2.0f * s * c * Apq + s * s * Aqq;
+            A(q, q) = s * s * App + 2.0f * s * c * Apq + c * c * Aqq;
+            A(p, q) = A(q, p) = 0.0f;
+
+            for (int r = 0; r < 3; ++r) {
+                if (r != p && r != q) {
+                    float Apr = A(p, r), Aqr = A(q, r);
+                    A(p, r) = A(r, p) = c * Apr - s * Aqr;
+                    A(q, r) = A(r, q) = s * Apr + c * Aqr;
+                }
+            }
+            for (int r = 0; r < 3; ++r) {
+                float Vrp = out_V(r, p), Vrq = out_V(r, q);
+                out_V(r, p) = c * Vrp - s * Vrq;
+                out_V(r, q) = s * Vrp + c * Vrq;
+            }
+        }
+    }
+    out_eigvals = {A(0, 0), A(1, 1), A(2, 2)};
+    if (out_V.determinant() < 0.0f) {
+        out_V(0, 0) = -out_V(0, 0);
+        out_V(1, 0) = -out_V(1, 0);
+        out_V(2, 0) = -out_V(2, 0);
+    }
+}
+
 
 struct GrnBone {
     int32_t index = 0;

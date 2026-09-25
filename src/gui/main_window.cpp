@@ -324,8 +324,10 @@ struct MainWindow::Impl {
         grnOptions = new GrnOptionsWidget(optionsStack);
         QObject::connect(grnOptions, &GrnOptionsWidget::optionsChanged, &owner, [this]() {
             updateViewerScale();
-            if (modelViewer && modelViewer->sourceViewport()) {
-                modelViewer->sourceViewport()->setZUpMode(grnOptions->convertCoordinates());
+            bool zUp = grnOptions->convertCoordinates();
+            if (modelViewer) {
+                if (modelViewer->sourceViewport()) modelViewer->sourceViewport()->setZUpMode(zUp);
+                if (modelViewer->targetViewport()) modelViewer->targetViewport()->setZUpMode(zUp);
             }
             if (targetInfoWidget) targetInfoWidget->markOutdated(true);
         });
@@ -340,8 +342,10 @@ struct MainWindow::Impl {
         glbOptions = new GlbOptionsWidget(optionsStack);
         QObject::connect(glbOptions, &GlbOptionsWidget::optionsChanged, &owner, [this]() {
             updateViewerScale();
-            if (modelViewer && modelViewer->sourceViewport()) {
-                modelViewer->sourceViewport()->setZUpMode(glbOptions->convertCoordinates());
+            bool zUp = glbOptions->convertCoordinates();
+            if (modelViewer) {
+                if (modelViewer->sourceViewport()) modelViewer->sourceViewport()->setZUpMode(zUp);
+                if (modelViewer->targetViewport()) modelViewer->targetViewport()->setZUpMode(zUp);
             }
             if (targetInfoWidget) targetInfoWidget->markOutdated(true);
         });
@@ -590,8 +594,7 @@ struct MainWindow::Impl {
                 glbOptions->setConvertCoordinates(shouldConvert);
             }
 
-            bool viewFlip = isGrn ? (grnOptions ? grnOptions->convertCoordinates() : isZUp)
-                                  : (glbOptions ? glbOptions->convertCoordinates() : isZUp);
+            bool viewFlip = isZUp;
             modelViewer->loadSourceModel(&*loadedModel, fi.fileName(), viewFlip);
             if (sourceInfoWidget) {
                 sourceInfoWidget->setSourceModel(&*loadedModel, path, isGrn);
@@ -667,11 +670,13 @@ struct MainWindow::Impl {
             owner.resize(1280, owner.height());
             if (loadedModel) {
                 QFileInfo fi(inputEdit->text());
-                modelViewer->loadSourceModel(&*loadedModel, fi.fileName());
+                bool sourceZUp = detect_is_z_up(*loadedModel);
+                modelViewer->loadSourceModel(&*loadedModel, fi.fileName(), sourceZUp);
             }
             if (convertedModel) {
                 QFileInfo fi(lastOutputPath);
-                modelViewer->loadTargetModel(&*convertedModel, fi.fileName());
+                bool targetZUp = detect_is_z_up(*convertedModel);
+                modelViewer->loadTargetModel(&*convertedModel, fi.fileName(), targetZUp);
             }
         } else {
             modelViewer->setVisible(false);
@@ -708,6 +713,11 @@ struct MainWindow::Impl {
     void onGrnAnimationSelected(const QString& animPath, int internalAnimIndex) {
         if (internalAnimIndex >= 0 && loadedModel && static_cast<size_t>(internalAnimIndex) < loadedModel->animations.size()) {
             const auto& a = loadedModel->animations[internalAnimIndex];
+            if (a.duration <= 0.0f || a.tracks.empty()) {
+                modelViewer->stopAnimation();
+                if (targetInfoWidget) targetInfoWidget->selectAnimation(-1, QString());
+                return;
+            }
             modelViewer->playSourceAnimation(&a, QString::fromStdString(a.name));
 
             if (targetInfoWidget) {
@@ -717,14 +727,20 @@ struct MainWindow::Impl {
             if (convertedModel) {
                 bool found = false;
                 for (const auto& ta : convertedModel->animations) {
-                    if (ta.name == a.name) {
+                    if (ta.name == a.name && ta.duration > 0.0f) {
                         modelViewer->playTargetAnimation(&ta, QString::fromStdString(ta.name));
                         found = true;
                         break;
                     }
                 }
                 if (!found && static_cast<size_t>(internalAnimIndex) < convertedModel->animations.size()) {
-                    modelViewer->playTargetAnimation(&convertedModel->animations[internalAnimIndex], QString());
+                    if (convertedModel->animations[internalAnimIndex].duration > 0.0f) {
+                        modelViewer->playTargetAnimation(&convertedModel->animations[internalAnimIndex], QString());
+                    } else {
+                        modelViewer->stopTargetAnimation();
+                    }
+                } else if (!found) {
+                    modelViewer->stopTargetAnimation();
                 }
             }
             return;
@@ -733,19 +749,38 @@ struct MainWindow::Impl {
         if (!animPath.isEmpty()) {
             cachedExternalAnimModel = parse_grn_file(std::filesystem::path(animPath.toStdWString()));
             if (cachedExternalAnimModel && !cachedExternalAnimModel->animations.empty()) {
+                QString clipStem = QFileInfo(animPath).completeBaseName();
+                for (auto& ea : cachedExternalAnimModel->animations) {
+                    if (ea.name.empty() || ea.name == "Animation") {
+                        ea.name = clipStem.toStdString();
+                    }
+                }
                 const auto& a = cachedExternalAnimModel->animations[0];
-                modelViewer->playSourceAnimation(&a, QFileInfo(animPath).fileName());
+                modelViewer->playSourceAnimation(&a, QFileInfo(animPath).fileName(), &cachedExternalAnimModel->bones);
 
                 if (targetInfoWidget) {
                     targetInfoWidget->selectAnimation(-2, QFileInfo(animPath).fileName());
                 }
 
                 if (convertedModel) {
+                    std::string stem = clipStem.toStdString();
+                    std::string stemLower = clipStem.toLower().toStdString();
+                    bool found = false;
                     for (const auto& ta : convertedModel->animations) {
-                        if (ta.name == a.name) {
+                        if (ta.duration <= 0.0f && ta.tracks.empty()) continue;
+                        std::string taLower = ta.name;
+                        std::transform(taLower.begin(), taLower.end(), taLower.begin(), ::tolower);
+                        if (ta.name == a.name || ta.name == stem ||
+                            taLower == stemLower ||
+                            taLower.find(stemLower) != std::string::npos ||
+                            stemLower.find(taLower) != std::string::npos) {
                             modelViewer->playTargetAnimation(&ta, QString::fromStdString(ta.name));
+                            found = true;
                             break;
                         }
+                    }
+                    if (!found) {
+                        modelViewer->stopTargetAnimation();
                     }
                 }
                 return;
@@ -761,6 +796,11 @@ struct MainWindow::Impl {
     void onGlbAnimationSelected(int animIndex) {
         if (animIndex >= 0 && loadedModel && static_cast<size_t>(animIndex) < loadedModel->animations.size()) {
             const auto& a = loadedModel->animations[animIndex];
+            if (a.duration <= 0.0f || a.tracks.empty()) {
+                modelViewer->stopAnimation();
+                if (targetInfoWidget) targetInfoWidget->selectAnimation(-1, QString());
+                return;
+            }
             modelViewer->playSourceAnimation(&a, QString::fromStdString(a.name));
 
             if (targetInfoWidget) {
@@ -770,14 +810,20 @@ struct MainWindow::Impl {
             if (convertedModel) {
                 bool found = false;
                 for (const auto& ta : convertedModel->animations) {
-                    if (ta.name == a.name) {
+                    if (ta.name == a.name && ta.duration > 0.0f) {
                         modelViewer->playTargetAnimation(&ta, QString::fromStdString(ta.name));
                         found = true;
                         break;
                     }
                 }
                 if (!found && static_cast<size_t>(animIndex) < convertedModel->animations.size()) {
-                    modelViewer->playTargetAnimation(&convertedModel->animations[animIndex], QString());
+                    if (convertedModel->animations[animIndex].duration > 0.0f) {
+                        modelViewer->playTargetAnimation(&convertedModel->animations[animIndex], QString());
+                    } else {
+                        modelViewer->stopTargetAnimation();
+                    }
+                } else if (!found) {
+                    modelViewer->stopTargetAnimation();
                 }
             }
         } else {
@@ -791,19 +837,33 @@ struct MainWindow::Impl {
     void onTargetAnimationSelected(int animIndex, const QString& clipPath) {
         if (animIndex >= 0 && convertedModel && static_cast<size_t>(animIndex) < convertedModel->animations.size()) {
             const auto& a = convertedModel->animations[animIndex];
+            if (a.duration <= 0.0f || a.tracks.empty()) {
+                modelViewer->stopAnimation();
+                return;
+            }
             modelViewer->playTargetAnimation(&a, QString::fromStdString(a.name));
 
             if (loadedModel) {
                 bool found = false;
-                for (const auto& sa : loadedModel->animations) {
-                    if (sa.name == a.name) {
+                std::string aLower = a.name;
+                std::transform(aLower.begin(), aLower.end(), aLower.begin(), ::tolower);
+                for (size_t si = 0; si < loadedModel->animations.size(); ++si) {
+                    const auto& sa = loadedModel->animations[si];
+                    if (sa.duration <= 0.0f && sa.tracks.empty()) continue;
+                    std::string saLower = sa.name;
+                    std::transform(saLower.begin(), saLower.end(), saLower.begin(), ::tolower);
+                    if (sa.name == a.name || saLower == aLower ||
+                        saLower.find(aLower) != std::string::npos ||
+                        aLower.find(saLower) != std::string::npos) {
                         modelViewer->playSourceAnimation(&sa, QString::fromStdString(sa.name));
+                        if (grnOptions) grnOptions->selectAnimationItem(static_cast<int>(si));
+                        if (glbOptions) glbOptions->selectAnimationItem(static_cast<int>(si));
                         found = true;
                         break;
                     }
                 }
-                if (!found && static_cast<size_t>(animIndex) < loadedModel->animations.size()) {
-                    modelViewer->playSourceAnimation(&loadedModel->animations[animIndex], QString());
+                if (!found) {
+                    modelViewer->stopSourceAnimation();
                 }
             }
             if (grnOptions) grnOptions->selectAnimationItem(animIndex);
@@ -811,28 +871,17 @@ struct MainWindow::Impl {
         } else if (!clipPath.isEmpty()) {
             cachedExternalAnimModel = parse_grn_file(std::filesystem::path(clipPath.toStdWString()));
             if (cachedExternalAnimModel && !cachedExternalAnimModel->animations.empty()) {
+                QString clipStem = QFileInfo(clipPath).completeBaseName();
+                for (auto& ea : cachedExternalAnimModel->animations) {
+                    if (ea.name.empty() || ea.name == "Animation") {
+                        ea.name = clipStem.toStdString();
+                    }
+                }
                 const auto& a = cachedExternalAnimModel->animations[0];
-                modelViewer->playTargetAnimation(&a, QFileInfo(clipPath).fileName());
+                modelViewer->playTargetAnimation(&a, QFileInfo(clipPath).fileName(), &cachedExternalAnimModel->bones);
 
-                if (loadedModel && !loadedModel->animations.empty()) {
-                    bool found = false;
-                    for (size_t si = 0; si < loadedModel->animations.size(); ++si) {
-                        const auto& sa = loadedModel->animations[si];
-                        if (sa.name == a.name ||
-                            sa.name.ends_with(a.name) ||
-                            a.name.ends_with(sa.name)) {
-                            modelViewer->playSourceAnimation(&sa, QString::fromStdString(sa.name));
-                            if (grnOptions) grnOptions->selectAnimationItem(static_cast<int>(si));
-                            if (glbOptions) glbOptions->selectAnimationItem(static_cast<int>(si));
-                            found = true;
-                            break;
-                        }
-                    }
-                    if (!found && loadedModel->animations.size() == 1) {
-                        modelViewer->playSourceAnimation(&loadedModel->animations[0], QString::fromStdString(loadedModel->animations[0].name));
-                        if (grnOptions) grnOptions->selectAnimationItem(0);
-                        if (glbOptions) glbOptions->selectAnimationItem(0);
-                    }
+                if (loadedModel) {
+                    modelViewer->playSourceAnimation(&a, QFileInfo(clipPath).fileName(), &cachedExternalAnimModel->bones);
                 }
             }
         } else {
@@ -992,6 +1041,11 @@ struct MainWindow::Impl {
                     targetInfoWidget->setTargetModel(&*convertedModel, lastOutputPath, isGrnToGlb);
                     if (boneInspectorWidget) {
                         boneInspectorWidget->setTargetModel(&*convertedModel);
+                    }
+                    if (isGrnToGlb && grnOptions) {
+                        grnOptions->reemitCurrentAnimation();
+                    } else if (!isGrnToGlb && glbOptions) {
+                        glbOptions->reemitCurrentAnimation();
                     }
                 } else {
                     targetInfoWidget->setTargetModel(nullptr, lastOutputPath, isGrnToGlb);

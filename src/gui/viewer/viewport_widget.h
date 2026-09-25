@@ -28,7 +28,7 @@ public:
     ~ViewportWidget() override;
 
     void loadModel(const GrnModel* model);
-    void playAnimation(const GrnAnimation* anim);
+    void playAnimation(const GrnAnimation* anim, const std::vector<GrnBone>* anim_bones = nullptr);
     void stopAnimation();
 
     void setPlaying(bool playing);
@@ -92,6 +92,7 @@ private:
     bool gl_initialized_{ false };
     const GrnModel* pending_model_{ nullptr };
     const GrnAnimation* pending_anim_{ nullptr };
+    const std::vector<GrnBone>* pending_anim_bones_{ nullptr };
 
     OrbitCamera camera_;
     SkinningEngine skinning_;

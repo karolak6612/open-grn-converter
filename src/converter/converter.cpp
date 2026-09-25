@@ -181,6 +181,17 @@ bool convert_file(const std::filesystem::path& input,
                     if (callback) callback(apath.filename().string(), 0.3f, true,
                         "Integrating animation '" + a.name + "' (" + std::to_string(a.tracks.size()) + " tracks, " +
                         std::to_string(a.duration) + "s)");
+                    // Granny 1.2b tracks directly map to model bone slots (no rebase needed)
+
+                    // Ensure track bone names match target bone names if needed
+                    for (auto& track : a.tracks) {
+                        for (const auto& tb : model->bones) {
+                            if (_stricmp(track.bone_name.c_str(), tb.name.c_str()) == 0) {
+                                track.bone_name = tb.name;
+                                break;
+                            }
+                        }
+                    }
                     model->animations.push_back(std::move(a));
                 }
             }
@@ -498,61 +509,32 @@ ConversionResult convert_directory(const std::filesystem::path& input_dir,
     return res;
 }
 
-bool detect_is_z_up(const GrnModel& model) {
-    // 1. Skeletal Bone Spine / Head Analysis
-    if (model.bones.size() >= 2) {
-        int headIdx = -1;
-        int pelvisIdx = -1;
-        for (size_t i = 0; i < model.bones.size(); ++i) {
-            std::string lower = model.bones[i].name;
-            std::transform(lower.begin(), lower.end(), lower.begin(),
-                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-            if (headIdx < 0 && (lower.find("head") != std::string::npos || lower.find("neck") != std::string::npos)) {
-                headIdx = static_cast<int>(i);
-            }
-            if (pelvisIdx < 0 && (lower.find("pelvis") != std::string::npos || lower.find("hips") != std::string::npos || lower.find("root") != std::string::npos)) {
-                pelvisIdx = static_cast<int>(i);
-            }
-        }
+static inline Vec4 quat_mul(const Vec4& a, const Vec4& b) {
+    return Vec4{
+        a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
+        a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
+        a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w,
+        a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z
+    };
+}
 
-        if (headIdx >= 0 && pelvisIdx >= 0 && headIdx != pelvisIdx) {
-            std::vector<Vec3> boneWorld(model.bones.size());
-            for (size_t bi = 0; bi < model.bones.size(); ++bi) {
-                int32_t p = model.bones[bi].parent_index;
-                if (p >= 0 && static_cast<size_t>(p) < bi) {
-                    boneWorld[bi] = {
-                        boneWorld[p].x + model.bones[bi].position.x,
-                        boneWorld[p].y + model.bones[bi].position.y,
-                        boneWorld[p].z + model.bones[bi].position.z
-                    };
-                } else {
-                    boneWorld[bi] = model.bones[bi].position;
-                }
-            }
-            float dy = std::abs(boneWorld[headIdx].y - boneWorld[pelvisIdx].y);
-            float dz = std::abs(boneWorld[headIdx].z - boneWorld[pelvisIdx].z);
-            if (dz > 1.25f * dy && dz > 1.0f) {
-                return true; // Spine is along Z -> Z-up
-            }
-            if (dy > 1.25f * dz && dy > 1.0f) {
-                return false; // Spine is along Y -> Y-up
-            }
-        }
-
-        // Bounding box of bone rest positions
-        float min_by = 1e30f, max_by = -1e30f;
-        float min_bz = 1e30f, max_bz = -1e30f;
-        for (const auto& b : model.bones) {
-            min_by = std::min(min_by, b.position.y); max_by = std::max(max_by, b.position.y);
-            min_bz = std::min(min_bz, b.position.z); max_bz = std::max(max_bz, b.position.z);
-        }
-        float b_span_y = max_by - min_by;
-        float b_span_z = max_bz - min_bz;
-        if (b_span_z > 1.3f * b_span_y && b_span_z > 1.0f) return true;
-        if (b_span_y > 1.3f * b_span_z && b_span_y > 1.0f) return false;
+static inline Vec4 quat_inv(const Vec4& q) {
+    float len_sq = q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w;
+    if (len_sq > 1e-12f) {
+        float inv = 1.0f / len_sq;
+        return Vec4{-q.x * inv, -q.y * inv, -q.z * inv, q.w * inv};
     }
+    return Vec4{0.0f, 0.0f, 0.0f, 1.0f};
+}
 
-    // 2. Vertex Bounding Box Analysis
+static inline Vec3 quat_rot_vec(const Vec4& q, const Vec3& v) {
+    Vec4 qv{v.x, v.y, v.z, 0.0f};
+    Vec4 res = quat_mul(quat_mul(q, qv), quat_inv(q));
+    return Vec3{res.x, res.y, res.z};
+}
+
+bool detect_is_z_up(const GrnModel& model) {
+    // 1. Vertex Bounding Box Analysis (Ground truth when meshes are present)
     float min_y = 1e30f, max_y = -1e30f;
     float min_z = 1e30f, max_z = -1e30f;
     size_t total_verts = 0;
@@ -567,15 +549,163 @@ bool detect_is_z_up(const GrnModel& model) {
     if (total_verts > 0) {
         float span_y = max_y - min_y;
         float span_z = max_z - min_z;
+
+        // Groundedness: base touches ground plane (~0) and rises into +axis
+        bool z_grounded = (span_z > 0.01f) && (min_z >= -0.15f * span_z) && (min_z <= 0.15f * span_z) && (max_z > 0.5f * span_z);
+        bool y_grounded = (span_y > 0.01f) && (min_y >= -0.15f * span_y) && (min_y <= 0.15f * span_y) && (max_y > 0.5f * span_y);
+
+        // Groundedness is invariant to body proportions (bipeds vs quadrupeds):
+        // Standing models in Z-up are grounded on Z=0 and extend into negative coordinates on Y.
+        // Standing models in Y-up are grounded on Y=0 and extend into negative coordinates on Z.
+        if (z_grounded && !y_grounded) {
+            return true; // Z-up: bipeds, quadrupeds, animals, ground props
+        }
+        if (y_grounded && !z_grounded) {
+            // A standing Y-up model (biped or quadruped) must have realistic 3D depth along Z.
+            // Slender directional meshes along Y with negligible Z thickness (swords, staves, bows,
+            // needles) are native Z-up weapons/props centered at the origin, not Y-up standing models.
+            if (span_z < 0.06f * span_y) {
+                return true; // Z-up weapon / directional prop
+            }
+            return false; // Y-up: glTF bipeds, glTF quadrupeds, ground props
+        }
+
+        // When both or neither are grounded:
         if (span_z > 1.25f * span_y && span_z > 0.01f) {
-            return true; // Height along Z -> Z-up
+            return true;                  // Height along Z -> Z-up biped
         }
         if (span_y > 1.25f * span_z && span_y > 0.01f) {
-            return false; // Height along Y -> Y-up
+            if (y_grounded) return false; // Height along Y -> Y-up biped
+            // For ungrounded models (flying creatures like bats, armor pieces, helmets, shoes)
+            // or quadrupeds with unusual bounds, do not declare Y-up without positive grounding evidence.
+            return true;
+        }
+
+        return true; // Mesh present and not Y-up -> default to Z-up for Granny
+    }
+
+    // 2. Skeletal Hierarchy World Transformation Analysis (for pure animation / skeleton-only models)
+    if (!model.bones.empty()) {
+        struct Mat4 {
+            float m[16];
+        };
+        std::vector<Mat4> world(model.bones.size());
+        for (size_t bi = 0; bi < model.bones.size(); ++bi) {
+            const auto& b = model.bones[bi];
+            float qx = b.rotation.x, qy = b.rotation.y, qz = b.rotation.z, qw = b.rotation.w;
+            float lenSq = qx * qx + qy * qy + qz * qz + qw * qw;
+            if (lenSq > 1e-8f) {
+                float inv = 1.0f / std::sqrt(lenSq);
+                qx *= inv; qy *= inv; qz *= inv; qw *= inv;
+            } else {
+                qx = qy = qz = 0.0f; qw = 1.0f;
+            }
+            float xx = qx * qx, yy = qy * qy, zz = qz * qz;
+            float xy = qx * qy, xz = qx * qz, yz = qy * qz;
+            float wx = qw * qx, wy = qw * qy, wz = qw * qz;
+
+            Mat4 local{};
+            local.m[0] = 1.0f - 2.0f * (yy + zz);
+            local.m[1] = 2.0f * (xy + wz);
+            local.m[2] = 2.0f * (xz - wy);
+            local.m[3] = 0.0f;
+
+            local.m[4] = 2.0f * (xy - wz);
+            local.m[5] = 1.0f - 2.0f * (xx + zz);
+            local.m[6] = 2.0f * (yz + wx);
+            local.m[7] = 0.0f;
+
+            local.m[8] = 2.0f * (xz + wy);
+            local.m[9] = 2.0f * (yz - wx);
+            local.m[10] = 1.0f - 2.0f * (xx + yy);
+            local.m[11] = 0.0f;
+
+            local.m[12] = b.position.x;
+            local.m[13] = b.position.y;
+            local.m[14] = b.position.z;
+            local.m[15] = 1.0f;
+
+            int32_t p = b.parent_index;
+            if (p >= 0 && static_cast<size_t>(p) < bi) {
+                const auto& pw = world[p];
+                Mat4 wm{};
+                for (int c = 0; c < 4; ++c) {
+                    for (int r = 0; r < 4; ++r) {
+                        float s = 0.0f;
+                        for (int k = 0; k < 4; ++k) s += pw.m[k * 4 + r] * local.m[c * 4 + k];
+                        wm.m[c * 4 + r] = s;
+                    }
+                }
+                world[bi] = wm;
+            } else {
+                world[bi] = local;
+            }
+        }
+
+        int headIdx = -1, pelvisIdx = -1, spineIdx = -1, rootIdx = -1;
+        for (size_t i = 0; i < model.bones.size(); ++i) {
+            std::string lower = model.bones[i].name;
+            std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+            if (headIdx < 0 && (lower.find("head") != std::string::npos || lower.find("neck") != std::string::npos)) {
+                headIdx = static_cast<int>(i);
+            }
+            if (spineIdx < 0 && lower.find("spine") != std::string::npos) {
+                spineIdx = static_cast<int>(i);
+            }
+            if (pelvisIdx < 0 && (lower.find("pelvis") != std::string::npos || lower.find("hips") != std::string::npos)) {
+                pelvisIdx = static_cast<int>(i);
+            }
+            if (rootIdx < 0 && lower.find("root") != std::string::npos) {
+                rootIdx = static_cast<int>(i);
+            }
+        }
+        if (pelvisIdx < 0) pelvisIdx = rootIdx;
+        if (pelvisIdx < 0) {
+            for (size_t i = 0; i < model.bones.size(); ++i) {
+                if (model.bones[i].parent_index < 0) {
+                    pelvisIdx = static_cast<int>(i);
+                    break;
+                }
+            }
+        }
+        int topIdx = (headIdx >= 0) ? headIdx : spineIdx;
+        if (topIdx >= 0 && pelvisIdx >= 0 && topIdx != pelvisIdx) {
+            float dy = std::abs(world[topIdx].m[13] - world[pelvisIdx].m[13]);
+            float dz = std::abs(world[topIdx].m[14] - world[pelvisIdx].m[14]);
+            if (dz > 1.25f * dy && dz > 1.0f) return true; // Humanoid/animal spine along Z -> Z-up
+            if (dy > 1.25f * dz && dy > 1.0f) return false; // Positive spine/head indicators point along Y -> Y-up
+        }
+
+        float min_wy = 1e30f, max_wy = -1e30f;
+        float min_wz = 1e30f, max_wz = -1e30f;
+        size_t valid_bones = 0;
+        for (size_t i = 0; i < model.bones.size(); ++i) {
+            std::string lower = model.bones[i].name;
+            std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+            // Ignore camera and light helper nodes that artificially inflate bounds
+            if (lower.find("cam") != std::string::npos || lower.find("spot") != std::string::npos ||
+                lower.find("light") != std::string::npos || lower.find(".target") != std::string::npos) {
+                continue;
+            }
+            valid_bones++;
+            float wy = world[i].m[13];
+            float wz = world[i].m[14];
+            min_wy = std::min(min_wy, wy); max_wy = std::max(max_wy, wy);
+            min_wz = std::min(min_wz, wz); max_wz = std::max(max_wz, wz);
+        }
+
+        if (valid_bones > 0) {
+            float w_span_y = max_wy - min_wy;
+            float w_span_z = max_wz - min_wz;
+            bool wz_grounded = (w_span_z > 0.01f) && (min_wz >= -0.2f * w_span_z) && (max_wz > 0.5f * w_span_z);
+            bool wy_grounded = (w_span_y > 0.01f) && (min_wy >= -0.2f * w_span_y) && (max_wy > 0.5f * w_span_y);
+
+            if (wz_grounded && !wy_grounded) return true;
+            if (w_span_z > 1.25f * w_span_y && w_span_z > 1.0f) return true;
         }
     }
 
-    return true; // Default to Z-up for Granny
+    return true; // Default to Z-up for Granny 1.2b
 }
 
 } // namespace grn

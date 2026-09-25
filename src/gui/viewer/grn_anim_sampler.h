@@ -42,6 +42,7 @@ public:
     float duration() const { return duration_; }
     float fps() const { return fps_; }
     const std::string& name() const { return name_; }
+    bool hasTrackForBone(size_t bone_idx) const { return bone_idx < bone_to_track_.size() && bone_to_track_[bone_idx] >= 0; }
 
     void sampleBone(size_t bone_idx,
                     const Vec3& rest_pos,

@@ -617,6 +617,23 @@ void GlbOptionsWidget::selectAnimationItem(int index) {
     }
 }
 
+void GlbOptionsWidget::reemitCurrentAnimation() {
+    if (!_impl->treeWidget) return;
+    auto* cur = _impl->treeWidget->currentItem();
+    if (!cur) {
+        auto* root = _impl->treeWidget->topLevelItem(0);
+        if (root && root->childCount() > 0) {
+            cur = root->child(0);
+            _impl->treeWidget->setCurrentItem(cur);
+            return;
+        }
+    }
+    if (cur) {
+        int animIdx = cur->data(0, Qt::UserRole).isValid() ? cur->data(0, Qt::UserRole).toInt() : -1;
+        emit animationSelected(animIdx);
+    }
+}
+
 void GlbOptionsWidget::reset() {
     _impl->reset();
 }

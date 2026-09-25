@@ -1,5 +1,6 @@
 #include "glb_writer.h"
 #include "../codecs/tga_png.h"
+#include "../gui/viewer/grn_anim_sampler.h"
 #include <nlohmann/json.hpp>
 #include <fstream>
 #include <iostream>
@@ -119,6 +120,100 @@ static Mat4x4 invert_mat4(const Mat4x4& mat) {
     return res;
 }
 
+static inline Mat4x4 mat4_mul(const Mat4x4& a, const Mat4x4& b) {
+    Mat4x4 r{};
+    for (int c = 0; c < 4; ++c) {
+        for (int row = 0; row < 4; ++row) {
+            float sum = 0.0f;
+            for (int k = 0; k < 4; ++k) {
+                sum += a.m[k * 4 + row] * b.m[c * 4 + k];
+            }
+            r.m[c * 4 + row] = sum;
+        }
+    }
+    return r;
+}
+
+static inline Mat4x4 compose_grn_transform(const Vec3& pos, const Vec4& rot, const std::array<float, 9>& scale_3x3) {
+    float qx = rot.x, qy = rot.y, qz = rot.z, qw = rot.w;
+    float lenSq = qx * qx + qy * qy + qz * qz + qw * qw;
+    if (lenSq > 1e-8f) {
+        float invLen = 1.0f / std::sqrt(lenSq);
+        qx *= invLen; qy *= invLen; qz *= invLen; qw *= invLen;
+    } else {
+        qx = qy = qz = 0.0f; qw = 1.0f;
+    }
+
+    float xx = qx * qx, yy = qy * qy, zz = qz * qz;
+    float xy = qx * qy, xz = qx * qz, yz = qy * qz;
+    float wx = qw * qx, wy = qw * qy, wz = qw * qz;
+
+    float R[3][3];
+    R[0][0] = 1.0f - 2.0f * (yy + zz);
+    R[0][1] = 2.0f * (xy - wz);
+    R[0][2] = 2.0f * (xz + wy);
+
+    R[1][0] = 2.0f * (xy + wz);
+    R[1][1] = 1.0f - 2.0f * (xx + zz);
+    R[1][2] = 2.0f * (yz - wx);
+
+    R[2][0] = 2.0f * (xz - wy);
+    R[2][1] = 2.0f * (yz + wx);
+    R[2][2] = 1.0f - 2.0f * (xx + yy);
+
+    float S[3][3];
+    for (int r = 0; r < 3; ++r) {
+        for (int c = 0; c < 3; ++c) {
+            S[r][c] = scale_3x3[r * 3 + c];
+        }
+    }
+
+    float RS[3][3];
+    for (int r = 0; r < 3; ++r) {
+        for (int c = 0; c < 3; ++c) {
+            RS[r][c] = R[r][0] * S[0][c] + R[r][1] * S[1][c] + R[r][2] * S[2][c];
+        }
+    }
+
+    Mat4x4 mat{};
+    for (int c = 0; c < 3; ++c) {
+        for (int r = 0; r < 3; ++r) {
+            mat.m[c * 4 + r] = RS[r][c];
+        }
+    }
+    mat.m[12] = pos.x;
+    mat.m[13] = pos.y;
+    mat.m[14] = pos.z;
+    mat.m[15] = 1.0f;
+    return mat;
+}
+
+static inline Mat3x3 extract_rotation_from_mat4(const Mat4x4& m) {
+    Mat3x3 A;
+    for (int r = 0; r < 3; ++r) {
+        for (int c = 0; c < 3; ++c) {
+            A(r, c) = m.m[c * 4 + r];
+        }
+    }
+    Mat3x3 C = A.transposed() * A;
+    Vec3 evals;
+    Mat3x3 V;
+    jacobi_sym3(C, evals, V);
+    Mat3x3 Sinv{};
+    Sinv(0, 0) = 1.0f / std::sqrt(std::max(1e-8f, evals.x));
+    Sinv(1, 1) = 1.0f / std::sqrt(std::max(1e-8f, evals.y));
+    Sinv(2, 2) = 1.0f / std::sqrt(std::max(1e-8f, evals.z));
+    Mat3x3 R = A * V * Sinv * V.transposed();
+    if (R.determinant() < 0.0f) {
+        int min_c = 0;
+        if (evals.y < evals.x && evals.y < evals.z) min_c = 1;
+        else if (evals.z < evals.x && evals.z < evals.y) min_c = 2;
+        Sinv(min_c, min_c) = -Sinv(min_c, min_c);
+        R = A * V * Sinv * V.transposed();
+    }
+    return R;
+}
+
 std::vector<uint8_t> export_grn_to_glb_memory(const GrnModel& model, const GlbExportOptions& options) {
     json gltf;
     gltf["asset"] = {
@@ -236,67 +331,94 @@ std::vector<uint8_t> export_grn_to_glb_memory(const GrnModel& model, const GlbEx
     // Nodes and Scene hierarchy
     std::vector<uint32_t> root_node_indices;
 
+    // Coordinate conversion matrix S_conv (Granny Z-up to glTF Y-up)
+    Mat4x4 S_conv = Mat4x4::identity();
+    Mat4x4 S_conv_inv = Mat4x4::identity();
+    if (options.y_up) {
+        S_conv.m[0] = 1.0f;
+        S_conv.m[5] = 0.0f;
+        S_conv.m[6] = -1.0f; // col 1, row 2: y_grn -> -z_glb
+        S_conv.m[9] = 1.0f;  // col 2, row 1: z_grn -> y_glb
+        S_conv.m[10] = 0.0f;
+        S_conv.m[15] = 1.0f;
+
+        S_conv_inv.m[0] = 1.0f;
+        S_conv_inv.m[5] = 0.0f;
+        S_conv_inv.m[6] = 1.0f;  // col 1, row 2: y_glb -> z_grn
+        S_conv_inv.m[9] = -1.0f; // col 2, row 1: z_glb -> -y_grn
+        S_conv_inv.m[10] = 0.0f;
+        S_conv_inv.m[15] = 1.0f;
+    }
+
     // Bones / Skeleton
     std::vector<uint32_t> joint_indices;
-    std::vector<bool> is_root_bone(model.bones.size(), false);
+    std::vector<Mat4x4> W_grn_rest(model.bones.size());
+    std::vector<Mat4x4> IBM_grn_rest(model.bones.size());
+    std::vector<Mat4x4> W_glb_rest(model.bones.size());
+    std::vector<Mat4x4> IBM_glb(model.bones.size());
     std::vector<Vec3> bone_node_trans(model.bones.size());
     std::vector<Vec4> bone_node_rot(model.bones.size());
-    std::vector<Vec3> bone_node_scale(model.bones.size(), {1.0f, 1.0f, 1.0f});
 
+    // 1. Evaluate Granny rest world matrices
     for (size_t bi = 0; bi < model.bones.size(); ++bi) {
         const auto& b = model.bones[bi];
-        bool is_root = (b.parent_index < 0 || b.parent_index == static_cast<int32_t>(bi) || static_cast<size_t>(b.parent_index) >= model.bones.size());
-        is_root_bone[bi] = is_root;
-
-        float qx = b.rotation.x, qy = b.rotation.y, qz = b.rotation.z, qw = b.rotation.w;
-        float tx = b.position.x, ty = b.position.y, tz = b.position.z;
-
-        if (options.y_up && is_root) {
-            Vec4 qr = quat_mul(q_yup_conv, {qx, qy, qz, qw});
-            qx = qr.x; qy = qr.y; qz = qr.z; qw = qr.w;
-            float n_tx = tx;
-            float n_ty = tz;
-            float n_tz = -ty;
-            tx = n_tx; ty = n_ty; tz = n_tz;
-        }
-
-        float qlen = std::sqrt(qx * qx + qy * qy + qz * qz + qw * qw);
-        if (qlen > 1e-6f) {
-            qx /= qlen; qy /= qlen; qz /= qlen; qw /= qlen;
+        Mat4x4 local_m = compose_grn_transform(b.position, b.rotation, b.scale_3x3);
+        int32_t p = b.parent_index;
+        if (p >= 0 && static_cast<size_t>(p) < bi && p != static_cast<int32_t>(bi)) {
+            W_grn_rest[bi] = mat4_mul(W_grn_rest[p], local_m);
         } else {
-            qx = 0.0f; qy = 0.0f; qz = 0.0f; qw = 1.0f;
+            W_grn_rest[bi] = local_m;
+        }
+        IBM_grn_rest[bi] = invert_mat4(W_grn_rest[bi]);
+    }
+
+    // 2. Build GLB Rest World Transforms and IBMs
+    for (size_t bi = 0; bi < model.bones.size(); ++bi) {
+        Mat3x3 R_grn = extract_rotation_from_mat4(W_grn_rest[bi]);
+        Mat4x4 R_grn_mat = Mat4x4::identity();
+        for (int c = 0; c < 3; ++c) {
+            for (int r = 0; r < 3; ++r) {
+                R_grn_mat.m[c * 4 + r] = R_grn(r, c);
+            }
+        }
+        R_grn_mat.m[12] = W_grn_rest[bi].m[12];
+        R_grn_mat.m[13] = W_grn_rest[bi].m[13];
+        R_grn_mat.m[14] = W_grn_rest[bi].m[14];
+
+        W_glb_rest[bi] = mat4_mul(S_conv, mat4_mul(R_grn_mat, S_conv_inv));
+        IBM_glb[bi] = invert_mat4(W_glb_rest[bi]);
+    }
+
+    // 3. Build GLB Rest Local Transforms & Joint Nodes
+    for (size_t bi = 0; bi < model.bones.size(); ++bi) {
+        const auto& b = model.bones[bi];
+        int32_t p = b.parent_index;
+        bool is_root = (p < 0 || p == static_cast<int32_t>(bi) || static_cast<size_t>(p) >= model.bones.size());
+
+        Mat4x4 Local_glb;
+        if (!is_root) {
+            Local_glb = mat4_mul(IBM_glb[p], W_glb_rest[bi]);
+        } else {
+            Local_glb = W_glb_rest[bi];
         }
 
-        float sx = b.scale_3x3[0];
-        float sy = b.scale_3x3[4];
-        float sz = b.scale_3x3[8];
-
-        if (options.y_up && is_root) {
-            float n_sy = sz;
-            float n_sz = sy;
-            sy = n_sy;
-            sz = n_sz;
+        Vec3 tx = {Local_glb.m[12], Local_glb.m[13], Local_glb.m[14]};
+        Mat3x3 local_R;
+        for (int c = 0; c < 3; ++c) {
+            for (int r = 0; r < 3; ++r) {
+                local_R(r, c) = Local_glb.m[c * 4 + r];
+            }
         }
+        Vec4 rx = mat3_to_quat(local_R);
 
-        if (std::abs(sx - 1.0f) < 1e-4f) sx = 1.0f;
-        if (std::abs(sy - 1.0f) < 1e-4f) sy = 1.0f;
-        if (std::abs(sz - 1.0f) < 1e-4f) sz = 1.0f;
-        if (std::abs(sx - (-1.0f)) < 1e-4f) sx = -1.0f;
-        if (std::abs(sy - (-1.0f)) < 1e-4f) sy = -1.0f;
-        if (std::abs(sz - (-1.0f)) < 1e-4f) sz = -1.0f;
-
-        bone_node_trans[bi] = {tx, ty, tz};
-        bone_node_rot[bi] = {qx, qy, qz, qw};
-        bone_node_scale[bi] = {sx, sy, sz};
+        bone_node_trans[bi] = tx;
+        bone_node_rot[bi] = rx;
 
         json node = {
             {"name", to_valid_utf8(b.name)},
-            {"translation", {tx, ty, tz}},
-            {"rotation", {qx, qy, qz, qw}}
+            {"translation", {tx.x, tx.y, tx.z}},
+            {"rotation", {rx.x, rx.y, rx.z, rx.w}}
         };
-        if (std::abs(sx - 1.0f) > 1e-5f || std::abs(sy - 1.0f) > 1e-5f || std::abs(sz - 1.0f) > 1e-5f) {
-            node["scale"] = {sx, sy, sz};
-        }
         uint32_t node_idx = static_cast<uint32_t>(gltf["nodes"].size());
         gltf["nodes"].push_back(node);
         joint_indices.push_back(node_idx);
@@ -316,64 +438,10 @@ std::vector<uint8_t> export_grn_to_glb_memory(const GrnModel& model, const GlbEx
 
     // Skins & Inverse Bind Matrices
     if (!model.bones.empty()) {
-        std::vector<Mat4x4> world_matrices(model.bones.size(), Mat4x4::identity());
         std::vector<float> ibm_floats;
         ibm_floats.reserve(model.bones.size() * 16);
-
         for (size_t bi = 0; bi < model.bones.size(); ++bi) {
-            const auto& b = model.bones[bi];
-            float qx = bone_node_rot[bi].x, qy = bone_node_rot[bi].y, qz = bone_node_rot[bi].z, qw = bone_node_rot[bi].w;
-            float tx = bone_node_trans[bi].x, ty = bone_node_trans[bi].y, tz = bone_node_trans[bi].z;
-            float sx = bone_node_scale[bi].x, sy = bone_node_scale[bi].y, sz = bone_node_scale[bi].z;
-
-            float xx = qx * qx, yy = qy * qy, zz = qz * qz;
-            float xy = qx * qy, xz = qx * qz, yz = qy * qz;
-            float wx = qw * qx, wy = qw * qy, wz = qw * qz;
-
-            Mat4x4 local_m{};
-            local_m.m[0] = (1.0f - 2.0f * (yy + zz)) * sx;
-            local_m.m[1] = (2.0f * (xy + wz)) * sx;
-            local_m.m[2] = (2.0f * (xz - wy)) * sx;
-            local_m.m[3] = 0.0f;
-
-            local_m.m[4] = (2.0f * (xy - wz)) * sy;
-            local_m.m[5] = (1.0f - 2.0f * (xx + zz)) * sy;
-            local_m.m[6] = (2.0f * (yz + wx)) * sy;
-            local_m.m[7] = 0.0f;
-
-            local_m.m[8] = (2.0f * (xz + wy)) * sz;
-            local_m.m[9] = (2.0f * (yz - wx)) * sz;
-            local_m.m[10] = (1.0f - 2.0f * (xx + yy)) * sz;
-            local_m.m[11] = 0.0f;
-
-            local_m.m[12] = tx;
-            local_m.m[13] = ty;
-            local_m.m[14] = tz;
-            local_m.m[15] = 1.0f;
-
-            if (!is_root_bone[bi] && b.parent_index >= 0 && static_cast<size_t>(b.parent_index) < bi) {
-                const auto& pw = world_matrices[b.parent_index];
-                Mat4x4 w_mat{};
-                for (int c = 0; c < 4; ++c) {
-                    for (int r = 0; r < 4; ++r) {
-                        float sum = 0.0f;
-                        for (int k = 0; k < 4; ++k) {
-                            sum += pw.m[k * 4 + r] * local_m.m[c * 4 + k];
-                        }
-                        w_mat.m[c * 4 + r] = sum;
-                    }
-                }
-                world_matrices[bi] = w_mat;
-            } else {
-                world_matrices[bi] = local_m;
-            }
-
-            Mat4x4 inv = invert_mat4(world_matrices[bi]);
-            inv.m[3] = 0.0f;
-            inv.m[7] = 0.0f;
-            inv.m[11] = 0.0f;
-            inv.m[15] = 1.0f;
-            for (int k = 0; k < 16; ++k) ibm_floats.push_back(inv.m[k]);
+            for (int k = 0; k < 16; ++k) ibm_floats.push_back(IBM_glb[bi].m[k]);
         }
 
         uint32_t ibm_bv = add_buffer_view(ibm_floats.data(), ibm_floats.size() * sizeof(float));
@@ -663,278 +731,163 @@ std::vector<uint8_t> export_grn_to_glb_memory(const GrnModel& model, const GlbEx
             anim_obj["name"] = unique_anim_name;
             json samplers = json::array();
             json channels = json::array();
-            std::set<std::pair<int32_t, std::string>> used_targets;
 
-            for (const auto& track : anim.tracks) {
-                int32_t node_idx = -1;
-                size_t target_bi = static_cast<size_t>(-1);
+            if (!model.bones.empty()) {
+                GrnAnimSampler sampler(anim, model.bones);
 
-                // 1. Exact bone name match
-                for (size_t bi = 0; bi < model.bones.size(); ++bi) {
-                    if (model.bones[bi].name == track.bone_name) {
-                        node_idx = joint_indices[bi];
-                        target_bi = bi;
-                        break;
-                    }
+                // Collect unique sample timestamps
+                std::set<float> time_set;
+                for (const auto& trk : anim.tracks) {
+                    for (float t : trk.translation_times) time_set.insert(t);
+                    for (float t : trk.rotation_times) time_set.insert(t);
+                    for (float t : trk.scale_shear_times) time_set.insert(t);
+                    for (float t : trk.times) time_set.insert(t);
+                }
+                time_set.insert(0.0f);
+                if (anim.duration > 0.0f) time_set.insert(anim.duration);
+
+                float fps = anim.fps > 0.0f ? anim.fps : 30.0f;
+                int num_frames = static_cast<int>(std::ceil(anim.duration * fps));
+                for (int f = 0; f <= num_frames; ++f) {
+                    float t = std::min(static_cast<float>(f) / fps, anim.duration);
+                    time_set.insert(t);
+                }
+                std::vector<float> sample_times(time_set.begin(), time_set.end());
+
+                if (sample_times.size() < 2) {
+                    sample_times.push_back(std::max(0.03333f, anim.duration));
                 }
 
-                // 2. Case-insensitive bone name match
-                if (node_idx < 0) {
+                uint32_t t_bv = add_buffer_view(sample_times.data(), sample_times.size() * sizeof(float));
+                float min_t = sample_times.front();
+                float max_t = sample_times.back();
+                uint32_t t_acc = static_cast<uint32_t>(accessors.size());
+                accessors.push_back({
+                    {"bufferView", t_bv}, {"byteOffset", 0}, {"componentType", 5126},
+                    {"count", sample_times.size()}, {"type", "SCALAR"},
+                    {"min", {min_t}}, {"max", {max_t}}
+                });
+
+                std::vector<std::vector<float>> all_bone_trans(model.bones.size());
+                std::vector<std::vector<float>> all_bone_rot(model.bones.size());
+                std::vector<Vec4> prev_rot = bone_node_rot;
+
+                for (float t : sample_times) {
+                    std::vector<Mat4x4> local_grn(model.bones.size());
+                    std::vector<Mat4x4> W_grn_anim(model.bones.size());
+                    std::vector<Mat4x4> W_glb_anim(model.bones.size());
+                    std::vector<Mat4x4> Local_glb_anim(model.bones.size());
+
                     for (size_t bi = 0; bi < model.bones.size(); ++bi) {
-                        if (track.bone_name.size() == model.bones[bi].name.size() &&
-                            std::equal(track.bone_name.begin(), track.bone_name.end(),
-                                       model.bones[bi].name.begin(),
-                                       [](char a, char b){ return std::tolower(static_cast<unsigned char>(a)) == std::tolower(static_cast<unsigned char>(b)); })) {
-                            node_idx = joint_indices[bi];
-                            target_bi = bi;
-                            break;
+                        const auto& b = model.bones[bi];
+                        Vec3 pos;
+                        Vec4 rot;
+                        std::array<float, 9> scale;
+                        sampler.sampleBone(bi, b.position, b.rotation, b.scale_3x3, t, pos, rot, scale);
+                        local_grn[bi] = compose_grn_transform(pos, rot, scale);
+
+                        int32_t p = b.parent_index;
+                        bool is_root = (p < 0 || p == static_cast<int32_t>(bi) || static_cast<size_t>(p) >= model.bones.size());
+                        if (!is_root) {
+                            W_grn_anim[bi] = mat4_mul(W_grn_anim[p], local_grn[bi]);
+                        } else {
+                            W_grn_anim[bi] = local_grn[bi];
                         }
-                    }
-                }
 
-                // 3. Fallback to channel_id ONLY if track has no specific name or synthetic "Bone_<channel_id>"
-                if (node_idx < 0 && (track.bone_name.empty() || track.bone_name == ("Bone_" + std::to_string(track.channel_id)))) {
-                    if (track.channel_id > 0 && static_cast<size_t>(track.channel_id - 1) < model.bones.size()) {
-                        target_bi = static_cast<size_t>(track.channel_id - 1);
-                        node_idx = joint_indices[target_bi];
-                    }
-                }
+                        // World-Space Skinning Invariance:
+                        // Skin_grn = W_grn_anim * IBM_grn_rest
+                        Mat4x4 Skin_grn = mat4_mul(W_grn_anim[bi], IBM_grn_rest[bi]);
+                        // Skin_glb = S_conv * Skin_grn * S_conv_inv
+                        Mat4x4 Skin_glb = mat4_mul(S_conv, mat4_mul(Skin_grn, S_conv_inv));
+                        // W_glb_anim = Skin_glb * W_glb_rest
+                        W_glb_anim[bi] = mat4_mul(Skin_glb, W_glb_rest[bi]);
 
-                // 4. Mesh node fallback
-                if (node_idx < 0) {
-                    for (size_t mi = 0; mi < model.meshes.size(); ++mi) {
-                        if (mi < mesh_node_indices.size() && model.meshes[mi].name == track.bone_name) {
-                            node_idx = static_cast<int32_t>(mesh_node_indices[mi]);
-                            break;
+                        if (!is_root) {
+                            Local_glb_anim[bi] = mat4_mul(invert_mat4(W_glb_anim[p]), W_glb_anim[bi]);
+                        } else {
+                            Local_glb_anim[bi] = W_glb_anim[bi];
                         }
+
+                        Vec3 tr = {Local_glb_anim[bi].m[12], Local_glb_anim[bi].m[13], Local_glb_anim[bi].m[14]};
+                        Mat3x3 R_loc = extract_rotation_from_mat4(Local_glb_anim[bi]);
+                        Vec4 q = mat3_to_quat(R_loc);
+
+                        // Enforce sign continuity across consecutive frames
+                        float dot = prev_rot[bi].x * q.x + prev_rot[bi].y * q.y + prev_rot[bi].z * q.z + prev_rot[bi].w * q.w;
+                        if (dot < 0.0f) {
+                            q.x = -q.x; q.y = -q.y; q.z = -q.z; q.w = -q.w;
+                        }
+                        prev_rot[bi] = q;
+
+                        all_bone_trans[bi].push_back(tr.x);
+                        all_bone_trans[bi].push_back(tr.y);
+                        all_bone_trans[bi].push_back(tr.z);
+
+                        all_bone_rot[bi].push_back(q.x);
+                        all_bone_rot[bi].push_back(q.y);
+                        all_bone_rot[bi].push_back(q.z);
+                        all_bone_rot[bi].push_back(q.w);
                     }
                 }
 
-                if (node_idx < 0) continue;
-                bool is_root = (target_bi < model.bones.size()) ? is_root_bone[target_bi] : false;
+                // Add channels for each joint
+                for (size_t bi = 0; bi < model.bones.size(); ++bi) {
+                    uint32_t node_idx = joint_indices[bi];
+                    bool is_root = (model.bones[bi].parent_index < 0 || model.bones[bi].parent_index == static_cast<int32_t>(bi));
+                    bool has_track = sampler.hasTrackForBone(bi);
 
-                if (track.format == "split") {
-                    if (!track.translation_times.empty() && !track.translations.empty() &&
-                        used_targets.find({node_idx, "translation"}) == used_targets.end()) {
-                        used_targets.insert({node_idx, "translation"});
-
-                        uint32_t t_bv = add_buffer_view(track.translation_times.data(), track.translation_times.size() * sizeof(float));
-                        float min_t = track.translation_times.front();
-                        float max_t = track.translation_times.back();
-                        uint32_t t_acc = static_cast<uint32_t>(accessors.size());
-                        accessors.push_back({
-                            {"bufferView", t_bv}, {"byteOffset", 0}, {"componentType", 5126},
-                            {"count", track.translation_times.size()}, {"type", "SCALAR"},
-                            {"min", {min_t}}, {"max", {max_t}}
-                        });
-
-                        std::vector<float> trans_vals;
-                        for (const auto& tr : track.translations) {
-                            if (options.y_up && is_root) {
-                                trans_vals.push_back(tr.x);
-                                trans_vals.push_back(tr.z);
-                                trans_vals.push_back(-tr.y);
-                            } else {
-                                trans_vals.push_back(tr.x);
-                                trans_vals.push_back(tr.y);
-                                trans_vals.push_back(tr.z);
+                    // Check translation motion
+                    bool has_trans_anim = is_root;
+                    if (!has_trans_anim) {
+                        for (size_t k = 0; k < sample_times.size(); ++k) {
+                            float dx = all_bone_trans[bi][k * 3 + 0] - bone_node_trans[bi].x;
+                            float dy = all_bone_trans[bi][k * 3 + 1] - bone_node_trans[bi].y;
+                            float dz = all_bone_trans[bi][k * 3 + 2] - bone_node_trans[bi].z;
+                            if (dx * dx + dy * dy + dz * dz > 1e-6f) {
+                                has_trans_anim = true;
+                                break;
                             }
                         }
-                        uint32_t v_bv = add_buffer_view(trans_vals.data(), trans_vals.size() * sizeof(float));
+                    }
+
+                    if (has_trans_anim) {
+                        uint32_t v_bv = add_buffer_view(all_bone_trans[bi].data(), all_bone_trans[bi].size() * sizeof(float));
                         uint32_t v_acc = static_cast<uint32_t>(accessors.size());
                         accessors.push_back({
                             {"bufferView", v_bv}, {"byteOffset", 0}, {"componentType", 5126},
-                            {"count", track.translations.size()}, {"type", "VEC3"}
+                            {"count", sample_times.size()}, {"type", "VEC3"}
                         });
-
                         uint32_t samp_idx = static_cast<uint32_t>(samplers.size());
                         samplers.push_back({{"input", t_acc}, {"output", v_acc}, {"interpolation", "LINEAR"}});
                         channels.push_back({{"sampler", samp_idx}, {"target", {{"node", node_idx}, {"path", "translation"}}}});
                     }
 
-                    if (!track.rotation_times.empty() && !track.rotations.empty() &&
-                        used_targets.find({node_idx, "rotation"}) == used_targets.end()) {
-                        used_targets.insert({node_idx, "rotation"});
-
-                        uint32_t t_bv = add_buffer_view(track.rotation_times.data(), track.rotation_times.size() * sizeof(float));
-                        float min_t = track.rotation_times.front();
-                        float max_t = track.rotation_times.back();
-                        uint32_t t_acc = static_cast<uint32_t>(accessors.size());
-                        accessors.push_back({
-                            {"bufferView", t_bv}, {"byteOffset", 0}, {"componentType", 5126},
-                            {"count", track.rotation_times.size()}, {"type", "SCALAR"},
-                            {"min", {min_t}}, {"max", {max_t}}
-                        });
-
-                        std::vector<float> rot_vals;
-                        for (const auto& rot : track.rotations) {
-                            Vec4 r = rot;
-                            if (options.y_up && is_root) {
-                                r = quat_mul(q_yup_conv, r);
+                    // Check rotation motion
+                    bool has_rot_anim = is_root || has_track;
+                    if (!has_rot_anim) {
+                        for (size_t k = 0; k < sample_times.size(); ++k) {
+                            float qx = all_bone_rot[bi][k * 4 + 0];
+                            float qy = all_bone_rot[bi][k * 4 + 1];
+                            float qz = all_bone_rot[bi][k * 4 + 2];
+                            float qw = all_bone_rot[bi][k * 4 + 3];
+                            float dot = std::abs(qx * bone_node_rot[bi].x + qy * bone_node_rot[bi].y + qz * bone_node_rot[bi].z + qw * bone_node_rot[bi].w);
+                            if (dot < 0.99999f) {
+                                has_rot_anim = true;
+                                break;
                             }
-                            float qlen = std::sqrt(r.x * r.x + r.y * r.y + r.z * r.z + r.w * r.w);
-                            if (qlen > 1e-6f) {
-                                r.x /= qlen; r.y /= qlen; r.z /= qlen; r.w /= qlen;
-                            } else {
-                                r = {0.0f, 0.0f, 0.0f, 1.0f};
-                            }
-                            rot_vals.push_back(r.x);
-                            rot_vals.push_back(r.y);
-                            rot_vals.push_back(r.z);
-                            rot_vals.push_back(r.w);
                         }
-                        uint32_t v_bv = add_buffer_view(rot_vals.data(), rot_vals.size() * sizeof(float));
+                    }
+
+                    if (has_rot_anim) {
+                        uint32_t v_bv = add_buffer_view(all_bone_rot[bi].data(), all_bone_rot[bi].size() * sizeof(float));
                         uint32_t v_acc = static_cast<uint32_t>(accessors.size());
                         accessors.push_back({
                             {"bufferView", v_bv}, {"byteOffset", 0}, {"componentType", 5126},
-                            {"count", track.rotations.size()}, {"type", "VEC4"}
+                            {"count", sample_times.size()}, {"type", "VEC4"}
                         });
-
                         uint32_t samp_idx = static_cast<uint32_t>(samplers.size());
                         samplers.push_back({{"input", t_acc}, {"output", v_acc}, {"interpolation", "LINEAR"}});
                         channels.push_back({{"sampler", samp_idx}, {"target", {{"node", node_idx}, {"path", "rotation"}}}});
-                    }
-
-                    if (!track.scale_shear_times.empty() && !track.scale_shears.empty() &&
-                        used_targets.find({node_idx, "scale"}) == used_targets.end()) {
-                        used_targets.insert({node_idx, "scale"});
-
-                        uint32_t t_bv = add_buffer_view(track.scale_shear_times.data(), track.scale_shear_times.size() * sizeof(float));
-                        float min_t = track.scale_shear_times.front();
-                        float max_t = track.scale_shear_times.back();
-                        uint32_t t_acc = static_cast<uint32_t>(accessors.size());
-                        accessors.push_back({
-                            {"bufferView", t_bv}, {"byteOffset", 0}, {"componentType", 5126},
-                            {"count", track.scale_shear_times.size()}, {"type", "SCALAR"},
-                            {"min", {min_t}}, {"max", {max_t}}
-                        });
-
-                        std::vector<float> scale_vals;
-                        for (const auto& m : track.scale_shears) {
-                            float sx = m[0];
-                            float sy = m[4];
-                            float sz = m[8];
-                            if (options.y_up && is_root) {
-                                std::swap(sy, sz);
-                            }
-                            scale_vals.push_back(sx);
-                            scale_vals.push_back(sy);
-                            scale_vals.push_back(sz);
-                        }
-                        uint32_t v_bv = add_buffer_view(scale_vals.data(), scale_vals.size() * sizeof(float));
-                        uint32_t v_acc = static_cast<uint32_t>(accessors.size());
-                        accessors.push_back({
-                            {"bufferView", v_bv}, {"byteOffset", 0}, {"componentType", 5126},
-                            {"count", track.scale_shears.size()}, {"type", "VEC3"}
-                        });
-
-                        uint32_t samp_idx = static_cast<uint32_t>(samplers.size());
-                        samplers.push_back({{"input", t_acc}, {"output", v_acc}, {"interpolation", "LINEAR"}});
-                        channels.push_back({{"sampler", samp_idx}, {"target", {{"node", node_idx}, {"path", "scale"}}}});
-                    }
-                } else {
-                    if (!track.times.empty() && (!track.translations.empty() || !track.rotations.empty() || !track.scale_shears.empty())) {
-                        bool need_trans = (used_targets.find({node_idx, "translation"}) == used_targets.end()) && !track.translations.empty();
-                        bool need_rot = (used_targets.find({node_idx, "rotation"}) == used_targets.end()) && !track.rotations.empty();
-                        bool need_scale = (used_targets.find({node_idx, "scale"}) == used_targets.end()) && !track.scale_shears.empty();
-
-                        if (need_trans || need_rot || need_scale) {
-                            uint32_t t_bv = add_buffer_view(track.times.data(), track.times.size() * sizeof(float));
-                            float min_t = track.times.front();
-                            float max_t = track.times.back();
-                            uint32_t t_acc = static_cast<uint32_t>(accessors.size());
-                            accessors.push_back({
-                                {"bufferView", t_bv}, {"byteOffset", 0}, {"componentType", 5126},
-                                {"count", track.times.size()}, {"type", "SCALAR"},
-                                {"min", {min_t}}, {"max", {max_t}}
-                            });
-
-                            if (need_trans) {
-                                used_targets.insert({node_idx, "translation"});
-
-                                std::vector<float> trans_vals;
-                                for (const auto& tr : track.translations) {
-                                    if (options.y_up && is_root) {
-                                        trans_vals.push_back(tr.x);
-                                        trans_vals.push_back(tr.z);
-                                        trans_vals.push_back(-tr.y);
-                                    } else {
-                                        trans_vals.push_back(tr.x);
-                                        trans_vals.push_back(tr.y);
-                                        trans_vals.push_back(tr.z);
-                                    }
-                                }
-                                uint32_t tv_bv = add_buffer_view(trans_vals.data(), trans_vals.size() * sizeof(float));
-                                uint32_t tv_acc = static_cast<uint32_t>(accessors.size());
-                                accessors.push_back({
-                                    {"bufferView", tv_bv}, {"byteOffset", 0}, {"componentType", 5126},
-                                    {"count", track.translations.size()}, {"type", "VEC3"}
-                                });
-
-                                uint32_t s_tr = static_cast<uint32_t>(samplers.size());
-                                samplers.push_back({{"input", t_acc}, {"output", tv_acc}, {"interpolation", "LINEAR"}});
-                                channels.push_back({{"sampler", s_tr}, {"target", {{"node", node_idx}, {"path", "translation"}}}});
-                            }
-
-                            if (need_rot) {
-                                used_targets.insert({node_idx, "rotation"});
-
-                                std::vector<float> rot_vals;
-                                for (const auto& rot : track.rotations) {
-                                    Vec4 r = rot;
-                                    if (options.y_up && is_root) {
-                                        r = quat_mul(q_yup_conv, r);
-                                    }
-                                    float qlen = std::sqrt(r.x * r.x + r.y * r.y + r.z * r.z + r.w * r.w);
-                                    if (qlen > 1e-6f) {
-                                        r.x /= qlen; r.y /= qlen; r.z /= qlen; r.w /= qlen;
-                                    } else {
-                                        r = {0.0f, 0.0f, 0.0f, 1.0f};
-                                    }
-                                    rot_vals.push_back(r.x);
-                                    rot_vals.push_back(r.y);
-                                    rot_vals.push_back(r.z);
-                                    rot_vals.push_back(r.w);
-                                }
-                                uint32_t rv_bv = add_buffer_view(rot_vals.data(), rot_vals.size() * sizeof(float));
-                                uint32_t rv_acc = static_cast<uint32_t>(accessors.size());
-                                accessors.push_back({
-                                    {"bufferView", rv_bv}, {"byteOffset", 0}, {"componentType", 5126},
-                                    {"count", track.rotations.size()}, {"type", "VEC4"}
-                                });
-
-                                uint32_t s_rot = static_cast<uint32_t>(samplers.size());
-                                samplers.push_back({{"input", t_acc}, {"output", rv_acc}, {"interpolation", "LINEAR"}});
-                                channels.push_back({{"sampler", s_rot}, {"target", {{"node", node_idx}, {"path", "rotation"}}}});
-                            }
-
-                            if (need_scale) {
-                                used_targets.insert({node_idx, "scale"});
-
-                                std::vector<float> scale_vals;
-                                for (const auto& m : track.scale_shears) {
-                                    float sx = m[0];
-                                    float sy = m[4];
-                                    float sz = m[8];
-                                    if (options.y_up && is_root) {
-                                        std::swap(sy, sz);
-                                    }
-                                    scale_vals.push_back(sx);
-                                    scale_vals.push_back(sy);
-                                    scale_vals.push_back(sz);
-                                }
-                                uint32_t sv_bv = add_buffer_view(scale_vals.data(), scale_vals.size() * sizeof(float));
-                                uint32_t sv_acc = static_cast<uint32_t>(accessors.size());
-                                accessors.push_back({
-                                    {"bufferView", sv_bv}, {"byteOffset", 0}, {"componentType", 5126},
-                                    {"count", track.scale_shears.size()}, {"type", "VEC3"}
-                                });
-
-                                uint32_t s_scale = static_cast<uint32_t>(samplers.size());
-                                samplers.push_back({{"input", t_acc}, {"output", sv_acc}, {"interpolation", "LINEAR"}});
-                                channels.push_back({{"sampler", s_scale}, {"target", {{"node", node_idx}, {"path", "scale"}}}});
-                            }
-                        }
                     }
                 }
             }

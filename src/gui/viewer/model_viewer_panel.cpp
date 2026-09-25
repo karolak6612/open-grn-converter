@@ -244,38 +244,54 @@ struct ModelViewerPanel::Impl {
         mainLayout->addWidget(playbackBar);
 
         // Connect Viewports <-> PlaybackBar
-        QObject::connect(sourceViewport, &ViewportWidget::playbackTimeChanged, playbackBar, &PlaybackBar::setTimeAndDuration);
-        QObject::connect(sourceViewport, &ViewportWidget::playbackStateChanged, playbackBar, &PlaybackBar::setPlaying);
+        auto updatePlaybackTime = [this]() {
+            float srcDur = sourceViewport->duration();
+            float tgtDur = targetViewport->duration();
+            if (srcDur > 0.0f) {
+                playbackBar->setTimeAndDuration(sourceViewport->currentTime(), srcDur);
+            } else if (tgtDur > 0.0f) {
+                playbackBar->setTimeAndDuration(targetViewport->currentTime(), tgtDur);
+            } else {
+                playbackBar->setTimeAndDuration(0.0f, 0.0f);
+            }
+        };
+        auto updatePlaybackState = [this]() {
+            bool playing = sourceViewport->isPlaying() || targetViewport->isPlaying();
+            playbackBar->setPlaying(playing);
+        };
+
+        QObject::connect(sourceViewport, &ViewportWidget::playbackTimeChanged, &owner, [updatePlaybackTime](float, float) {
+            updatePlaybackTime();
+        });
+        QObject::connect(targetViewport, &ViewportWidget::playbackTimeChanged, &owner, [updatePlaybackTime](float, float) {
+            updatePlaybackTime();
+        });
+        QObject::connect(sourceViewport, &ViewportWidget::playbackStateChanged, &owner, [updatePlaybackState](bool) {
+            updatePlaybackState();
+        });
+        QObject::connect(targetViewport, &ViewportWidget::playbackStateChanged, &owner, [updatePlaybackState](bool) {
+            updatePlaybackState();
+        });
 
         QObject::connect(playbackBar, &PlaybackBar::playToggled, &owner, [this](bool p) {
             sourceViewport->setPlaying(p);
-            if (syncAnimBtn && syncAnimBtn->isChecked()) {
-                targetViewport->setPlaying(p);
-            }
+            targetViewport->setPlaying(p);
         });
         QObject::connect(playbackBar, &PlaybackBar::rewindClicked, &owner, [this]() {
             sourceViewport->setTime(0.0f);
-            if (syncAnimBtn && syncAnimBtn->isChecked()) {
-                targetViewport->setTime(0.0f);
-            }
+            targetViewport->setTime(0.0f);
         });
         QObject::connect(playbackBar, &PlaybackBar::loopToggled, &owner, [this](bool l) {
             sourceViewport->setLooping(l);
-            if (syncAnimBtn && syncAnimBtn->isChecked()) {
-                targetViewport->setLooping(l);
-            }
+            targetViewport->setLooping(l);
         });
         QObject::connect(playbackBar, &PlaybackBar::timeSeeked, &owner, [this](float t) {
             sourceViewport->setTime(t);
-            if (syncAnimBtn && syncAnimBtn->isChecked()) {
-                targetViewport->setTime(t);
-            }
+            targetViewport->setTime(t);
         });
         QObject::connect(playbackBar, &PlaybackBar::speedChanged, &owner, [this](float spd) {
             sourceViewport->setPlaybackSpeed(spd);
-            if (syncAnimBtn && syncAnimBtn->isChecked()) {
-                targetViewport->setPlaybackSpeed(spd);
-            }
+            targetViewport->setPlaybackSpeed(spd);
         });
 
         // Model loading badge update
@@ -350,18 +366,26 @@ void ModelViewerPanel::loadTargetModel(const GrnModel* model, const QString& tit
     }
 }
 
-void ModelViewerPanel::playSourceAnimation(const GrnAnimation* anim, const QString& /*animTitle*/) {
-    _impl->sourceViewport->playAnimation(anim);
+void ModelViewerPanel::playSourceAnimation(const GrnAnimation* anim, const QString& /*animTitle*/, const std::vector<GrnBone>* animBones) {
+    _impl->sourceViewport->playAnimation(anim, animBones);
 }
 
-void ModelViewerPanel::playTargetAnimation(const GrnAnimation* anim, const QString& /*animTitle*/) {
-    _impl->targetViewport->playAnimation(anim);
+void ModelViewerPanel::playTargetAnimation(const GrnAnimation* anim, const QString& /*animTitle*/, const std::vector<GrnBone>* animBones) {
+    _impl->targetViewport->playAnimation(anim, animBones);
 }
 
-void ModelViewerPanel::playAnimation(const GrnAnimation* anim, const QString& animTitle) {
-    _impl->sourceViewport->playAnimation(anim);
-    _impl->targetViewport->playAnimation(anim);
+void ModelViewerPanel::playAnimation(const GrnAnimation* anim, const QString& animTitle, const std::vector<GrnBone>* animBones) {
+    _impl->sourceViewport->playAnimation(anim, animBones);
+    _impl->targetViewport->playAnimation(anim, animBones);
     (void)animTitle;
+}
+
+void ModelViewerPanel::stopSourceAnimation() {
+    _impl->sourceViewport->stopAnimation();
+}
+
+void ModelViewerPanel::stopTargetAnimation() {
+    _impl->targetViewport->stopAnimation();
 }
 
 void ModelViewerPanel::stopAnimation() {

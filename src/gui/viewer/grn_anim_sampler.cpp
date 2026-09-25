@@ -330,9 +330,10 @@ void GrnAnimSampler::setAnimation(const GrnAnimation& anim, const std::vector<Gr
         ct.bone_name = t.bone_name;
 
         // 1. Translations
-        if (!t.translation_times.empty() && !t.translations.empty()) {
+        const auto& pos_times = !t.translation_times.empty() ? t.translation_times : t.times;
+        if (!pos_times.empty() && !t.translations.empty()) {
             ct.pos_mode = t.position_interp_mode;
-            ct.pos_times = buildPaddedTimes(t.translation_times);
+            ct.pos_times = buildPaddedTimes(pos_times);
             std::vector<float> flatPos;
             flatPos.reserve(t.translations.size() * 3);
             for (const auto& v : t.translations) {
@@ -344,11 +345,12 @@ void GrnAnimSampler::setAnimation(const GrnAnimation& anim, const std::vector<Gr
         }
 
         // 2. Rotations
-        if (!t.rotation_times.empty() && !t.rotations.empty()) {
+        const auto& rot_times = !t.rotation_times.empty() ? t.rotation_times : t.times;
+        if (!rot_times.empty() && !t.rotations.empty()) {
             ct.rot_mode = t.quaternion_interp_mode;
-            ct.rot_times = buildPaddedTimes(t.rotation_times);
+            ct.rot_times = buildPaddedTimes(rot_times);
             auto conditionedQuats = alignSourceRotationHemispheres(t.rotations);
-            filterSourceRotationSpikes(conditionedQuats, t.rotation_times);
+            filterSourceRotationSpikes(conditionedQuats, rot_times);
 
             std::vector<float> flatRot;
             flatRot.reserve(conditionedQuats.size() * 4);
@@ -362,9 +364,10 @@ void GrnAnimSampler::setAnimation(const GrnAnimation& anim, const std::vector<Gr
         }
 
         // 3. Scale / Shears
-        if (!t.scale_shear_times.empty() && !t.scale_shears.empty()) {
+        const auto& scale_times = !t.scale_shear_times.empty() ? t.scale_shear_times : t.times;
+        if (!scale_times.empty() && !t.scale_shears.empty()) {
             ct.scale_mode = t.scale_shear_interp_mode;
-            ct.scale_times = buildPaddedTimes(t.scale_shear_times);
+            ct.scale_times = buildPaddedTimes(scale_times);
             std::vector<float> flatScale;
             flatScale.reserve(t.scale_shears.size() * 9);
             for (const auto& s : t.scale_shears) {

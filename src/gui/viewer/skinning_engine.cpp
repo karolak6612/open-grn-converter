@@ -1,4 +1,5 @@
 #include "skinning_engine.h"
+#include "../../converter/converter.h"
 #include <algorithm>
 #include <cmath>
 
@@ -120,7 +121,7 @@ void SkinningEngine::setModel(const GrnModel* model) {
     }
 }
 
-void SkinningEngine::setAnimation(const GrnAnimation* anim) {
+void SkinningEngine::setAnimation(const GrnAnimation* anim, const std::vector<GrnBone>* /*anim_bones*/) {
     if (anim && model_) {
         sampler_.setAnimation(*anim, model_->bones);
     } else {

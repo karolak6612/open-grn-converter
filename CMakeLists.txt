@@ -74,6 +74,7 @@ set(GRN_CORE_SOURCES
     src/converter/converter.cpp
     src/converter/mesh_optimizer.cpp
     src/converter/anim_optimizer.cpp
+    src/gui/viewer/grn_anim_sampler.cpp
 )
 
 set(GRN_CORE_HEADERS
@@ -89,6 +90,7 @@ set(GRN_CORE_HEADERS
     src/converter/converter.h
     src/converter/mesh_optimizer.h
     src/converter/anim_optimizer.h
+    src/gui/viewer/grn_anim_sampler.h
 )
 
 add_library(grn_core STATIC
@@ -266,11 +268,13 @@ add_grn_test(test_roundtrip tests/test_roundtrip.cpp)
 add_grn_test(test_texture_hue tests/test_texture_hue.cpp)
 add_grn_test(test_viewer_compat tests/test_viewer_compat.cpp)
 add_grn_test(test_optimizer tests/test_optimizer.cpp)
+add_grn_test(test_stress_detect tests/test_stress_detect.cpp)
+add_grn_test(test_challenger_adversarial tests/test_challenger_adversarial.cpp)
+
 
 add_executable(test_viewer_engine
     tests/test_viewer_engine.cpp
     src/gui/viewer/camera.cpp
-    src/gui/viewer/grn_anim_sampler.cpp
     src/gui/viewer/skinning_engine.cpp
 )
 target_include_directories(test_viewer_engine
@@ -285,3 +289,4 @@ target_link_libraries(test_viewer_engine
         Qt6::Gui
 )
 add_test(NAME test_viewer_engine COMMAND test_viewer_engine)
+

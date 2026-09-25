@@ -166,11 +166,53 @@ static void test_glb_reader_bone_weights_preservation() {
     std::cout << "  GLB Reader bone weights preservation test passed." << std::endl;
 }
 
+static void test_wolf_diagnostics() {
+    std::filesystem::path wolf_path = "E:/Sacred_Unpacked/wolf/0016_WOLF.GRN";
+    std::filesystem::path run_path = "E:/Sacred_Unpacked/wolf/1633_WOLF_RUN_BH.GRN";
+    if (!std::filesystem::exists(wolf_path) || !std::filesystem::exists(run_path)) return;
+
+    std::cout << "[DIAGNOSTIC] Parsing wolf and run animation..." << std::endl;
+    auto wolf = grn::parse_grn_file(wolf_path);
+    auto run = grn::parse_grn_file(run_path);
+    if (!wolf || !run) {
+        std::cout << "Failed to parse wolf files!" << std::endl;
+        return;
+    }
+
+    std::cout << "Wolf bones (" << wolf->bones.size() << "):" << std::endl;
+    for (size_t i = 0; i < std::min(size_t(10), wolf->bones.size()); ++i) {
+        std::cout << "  [" << i << "] parent=" << wolf->bones[i].parent_index 
+                  << " name='" << wolf->bones[i].name 
+                  << "' pos=(" << wolf->bones[i].position.x << "," << wolf->bones[i].position.y << "," << wolf->bones[i].position.z << ")"
+                  << " rot=(" << wolf->bones[i].rotation.x << "," << wolf->bones[i].rotation.y << "," << wolf->bones[i].rotation.z << "," << wolf->bones[i].rotation.w << ")\n";
+    }
+
+    std::filesystem::path dying_path = "E:/Sacred_Unpacked/wolf/1630_WOLF_DYING_A.GRN";
+    std::filesystem::path hit_path = "E:/Sacred_Unpacked/wolf/1631_WOLF_HIT_A.GRN";
+    auto dying = grn::parse_grn_file(dying_path);
+    auto hit = grn::parse_grn_file(hit_path);
+    std::cout << "Dying parsed: " << (dying.has_value() ? "YES" : "NO")
+              << " anims=" << (dying ? dying->animations.size() : 0)
+              << " bones=" << (dying ? dying->bones.size() : 0) << std::endl;
+    if (dying && !dying->animations.empty()) {
+        std::cout << "  Dying anim tracks=" << dying->animations[0].tracks.size()
+                  << " duration=" << dying->animations[0].duration << std::endl;
+    }
+    std::cout << "Hit parsed: " << (hit.has_value() ? "YES" : "NO")
+              << " anims=" << (hit ? hit->animations.size() : 0)
+              << " bones=" << (hit ? hit->bones.size() : 0) << std::endl;
+    if (hit && !hit->animations.empty()) {
+        std::cout << "  Hit anim tracks=" << hit->animations[0].tracks.size()
+                  << " duration=" << hit->animations[0].duration << std::endl;
+    }
+}
+
 int main() {
     std::cout << "=== Running Parser Unit Tests ===" << std::endl;
     test_parser_synthetic_model();
     test_parser_synthetic_animation();
     test_glb_reader_bone_weights_preservation();
+    test_wolf_diagnostics();
     std::cout << "All parser tests passed successfully." << std::endl;
     return 0;
 }

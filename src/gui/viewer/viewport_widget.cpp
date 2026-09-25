@@ -60,11 +60,13 @@ void ViewportWidget::initializeGL() {
     if (pending_model_) {
         const GrnModel* m = pending_model_;
         const GrnAnimation* a = pending_anim_;
+        const std::vector<GrnBone>* b = pending_anim_bones_;
         pending_model_ = nullptr;
         pending_anim_ = nullptr;
+        pending_anim_bones_ = nullptr;
         loadModel(m);
         if (a) {
-            playAnimation(a);
+            playAnimation(a, b);
         }
     }
 }
@@ -277,9 +279,10 @@ void ViewportWidget::loadModel(const GrnModel* model) {
     update();
 }
 
-void ViewportWidget::playAnimation(const GrnAnimation* anim) {
+void ViewportWidget::playAnimation(const GrnAnimation* anim, const std::vector<GrnBone>* anim_bones) {
     pending_anim_ = anim;
-    skinning_.setAnimation(anim);
+    pending_anim_bones_ = anim_bones;
+    skinning_.setAnimation(anim, anim_bones);
     current_time_ = 0.0f;
     is_playing_ = (anim != nullptr && skinning_.duration() > 0.0f);
     emit playbackStateChanged(is_playing_);
@@ -291,6 +294,7 @@ void ViewportWidget::playAnimation(const GrnAnimation* anim) {
 
 void ViewportWidget::stopAnimation() {
     pending_anim_ = nullptr;
+    pending_anim_bones_ = nullptr;
     skinning_.clearAnimation();
     current_time_ = 0.0f;
     is_playing_ = false;

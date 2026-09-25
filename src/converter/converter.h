@@ -6,12 +6,11 @@
 #pragma once
 
 #include "options.h"
+#include "../core/grn_types.h"
 #include <filesystem>
 #include <vector>
 
 namespace grn {
-
-struct GrnModel;
 
 /**
  * @brief Summary statistics returned after completing a conversion job.

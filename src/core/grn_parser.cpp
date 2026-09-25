@@ -785,6 +785,9 @@ static std::vector<GrnAnimation> decode_animations(
                     for (size_t f = 0; f < num_frames && p + FRAME <= data_len; ++f) {
                         float t = rF32(data + p);
                         track.times.push_back(t);
+                        track.translation_times.push_back(t);
+                        track.rotation_times.push_back(t);
+                        track.scale_shear_times.push_back(t);
                         max_time = std::max(max_time, t);
                         track.translations.push_back(rVec3(data + p + 4));
                         track.rotations.push_back(rVec4(data + p + 16));

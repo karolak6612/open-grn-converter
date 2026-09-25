@@ -5,6 +5,7 @@
 #include <QMatrix4x4>
 #include <QVector3D>
 #include <vector>
+#include <optional>
 
 namespace grn {
 
@@ -16,7 +17,7 @@ public:
     SkinningEngine() = default;
 
     void setModel(const GrnModel* model);
-    void setAnimation(const GrnAnimation* anim);
+    void setAnimation(const GrnAnimation* anim, const std::vector<GrnBone>* anim_bones = nullptr);
     void clearAnimation();
 
     void evaluate(float time_seconds);
@@ -27,6 +28,7 @@ public:
     const std::vector<std::vector<QVector3D>>& skinnedPositions() const { return skinned_positions_; }
     const std::vector<QMatrix4x4>& worldMatrices() const { return world_matrices_; }
     const std::vector<QMatrix4x4>& skinMatrices() const { return skin_matrices_; }
+    const std::vector<QMatrix4x4>& inverseBindMatrices() const { return inverse_bind_matrices_; }
 
     void computeBounds(QVector3D& out_min, QVector3D& out_max) const;
 
