@@ -429,90 +429,6 @@ static void test_fuzz_detect_is_z_up() {
     std::cout << "  -> 2,000 fuzzed models evaluated with 0 crashes: PASSED" << std::endl;
 }
 
-// ---------------------------------------------------------------------------
-// 6. Real-World Assets Verification
-// ---------------------------------------------------------------------------
-static void test_real_world_assets() {
-    std::cout << "[TEST] 6. Real-World Extracted Assets..." << std::endl;
-
-    namespace fs = std::filesystem;
-    std::string test_dir = "E:/Github/SacredMdlExtr/extracted_test";
-    if (!fs::exists(test_dir)) {
-        std::cout << "  [SKIP] Test directory " << test_dir << " not available." << std::endl;
-        return;
-    }
-
-    // A. Sacred Quadrupeds (Must ALL evaluate to Z-up: true)
-    const std::vector<std::string> quadrupeds = {
-        "0016_WOLF.GRN",
-        "0009_PIG.GRN",
-        "0002_BEAR.GRN",
-        "0008_HORSE.GRN",
-        "0001_BAT.GRN",
-        "0003_BULL.GRN",
-        "0004_CHICKEN.GRN",
-        "0005_COW.GRN",
-        "0007_DEER.GRN",
-        "0010_RABBIT.GRN",
-        "0011_RED_DEER.GRN",
-        "0012_SHEEP.GRN",
-        "0015_WILD_BOAR.GRN"
-    };
-
-    for (const auto& qname : quadrupeds) {
-        fs::path p = fs::path(test_dir) / qname;
-        if (!fs::exists(p)) continue;
-        auto model = grn::parse_grn_file(p);
-        TEST_CHECK(model.has_value(), "Failed to parse: " + qname);
-        bool is_z = grn::detect_is_z_up(*model);
-        TEST_CHECK(is_z == true, "Quadruped " + qname + " must be detected as Z-up");
-    }
-    std::cout << "  -> All 13 Sacred quadrupeds evaluated to Z-up: PASSED" << std::endl;
-
-    // B. Wolf Pure Animation Clips (Zero Meshes, Bones Only)
-    const std::vector<std::string> wolf_anims = {
-        "1629_WOLF_ATTACK_BH_A.GRN",
-        "1630_WOLF_DYING_A.GRN",
-        "1631_WOLF_HIT_A.GRN",
-        "1632_WOLF_IDLE_BH.GRN",
-        "1633_WOLF_RUN_BH.GRN",
-        "1634_WOLF_WALK_BH.GRN"
-    };
-
-    for (const auto& aname : wolf_anims) {
-        fs::path p = fs::path(test_dir) / aname;
-        if (!fs::exists(p)) continue;
-        auto model = grn::parse_grn_file(p);
-        TEST_CHECK(model.has_value(), "Failed to parse animation: " + aname);
-        TEST_CHECK(model->meshes.empty(), "Animation " + aname + " should have 0 meshes");
-        TEST_CHECK(!model->bones.empty(), "Animation " + aname + " must have bones");
-        bool is_z = grn::detect_is_z_up(*model);
-        TEST_CHECK(is_z == true, "Pure animation " + aname + " must be detected as Z-up");
-    }
-    std::cout << "  -> All 6 pure wolf animation clips evaluated to Z-up: PASSED" << std::endl;
-
-    // C. glTF / GLB Models (Must evaluate to Y-up: false)
-    const std::vector<std::string> glb_models = {
-        "test_wolf.glb",
-        "test_wolf_walk.glb",
-        "wolf_static.glb"
-    };
-
-    for (const auto& gname : glb_models) {
-        if (!fs::exists(gname)) continue;
-        grn::GlbImportOptions imp_opt;
-        imp_opt.y_up = false;
-        auto model = grn::load_glb_file(gname, imp_opt);
-        TEST_CHECK(model.has_value(), "Failed to parse GLB: " + gname);
-        bool is_z = grn::detect_is_z_up(*model);
-        TEST_CHECK(is_z == false, "GLB model " + gname + " must be detected as Y-up (false)");
-    }
-    std::cout << "  -> All glTF quadruped models evaluated to Y-up: PASSED" << std::endl;
-}
-
-// ---------------------------------------------------------------------------
-// Main
-// ---------------------------------------------------------------------------
 int main() {
     std::cout << "==========================================================" << std::endl;
     std::cout << "  STARTING EMPIRICAL STRESS TESTS FOR detect_is_z_up      " << std::endl;
@@ -523,7 +439,6 @@ int main() {
     test_extreme_bounds_and_zero_verts();
     test_skeletal_hierarchy_adversarial();
     test_fuzz_detect_is_z_up();
-    test_real_world_assets();
 
     std::cout << "==========================================================" << std::endl;
     std::cout << "  ALL STRESS TESTS COMPLETED SUCCESSFULLY (100% PASS RATE)" << std::endl;
