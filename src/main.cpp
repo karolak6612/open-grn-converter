@@ -13,6 +13,7 @@
 #include <oclero/qlementine/icons/QlementineIcons.hpp>
 #include <string>
 #include <fstream>
+#include <iostream>
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -20,7 +21,6 @@
 #endif
 #include <windows.h>
 #include <cstdio>
-#include <iostream>
 #include <io.h>
 #include <fcntl.h>
 #endif
