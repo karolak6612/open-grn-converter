@@ -26,6 +26,20 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug"
       }
+    },
+    {
+      "name": "linux-release",
+      "displayName": "Linux Release (GCC + vcpkg)",
+      "description": "Linux configuration assumes VCPKG_ROOT=/usr/local/share/vcpkg and system Qt6",
+      "binaryDir": "${sourceDir}/build",
+      "generator": "Ninja",
+      "environment": {
+        "VCPKG_ROOT": "/usr/local/share/vcpkg"
+      },
+      "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
     }
   ],
   "buildPresets": [
@@ -38,12 +52,29 @@
       "name": "debug",
       "configurePreset": "debug",
       "configuration": "Debug"
+    },
+    {
+      "name": "linux-release",
+      "configurePreset": "linux-release",
+      "configuration": "Release"
     }
   ],
   "testPresets": [
     {
       "name": "release",
       "configurePreset": "release",
+      "configuration": "Release",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "debug",
+      "configurePreset": "debug",
+      "configuration": "Debug",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "linux-release",
+      "configurePreset": "linux-release",
       "configuration": "Release",
       "output": { "outputOnFailure": true }
     }

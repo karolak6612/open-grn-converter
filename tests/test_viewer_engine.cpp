@@ -413,6 +413,11 @@ static void test_bone_labels() {
 }
 
 int main(int argc, char* argv[]) {
+#ifndef _WIN32
+    if (!qEnvironmentVariableIsSet("QT_QPA_PLATFORM")) {
+        qputenv("QT_QPA_PLATFORM", "offscreen");
+    }
+#endif
     QGuiApplication app(argc, argv);
     try {
         test_orbit_camera();
