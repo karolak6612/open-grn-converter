@@ -12,7 +12,14 @@
 #include <filesystem>
 
 #include <iostream>
-#include <cassert>
+#include <stdexcept>
+#define TEST_ASSERT(cond) \
+    do { \
+        if (!(cond)) { \
+            throw std::runtime_error(std::string("Assertion failed: ") + #cond + " at " + __FILE__ + ":" + std::to_string(__LINE__)); \
+        } \
+    } while (0)
+
 #include <vector>
 
 static void test_split_97k_mesh() {
@@ -45,8 +52,8 @@ static void test_split_97k_mesh() {
     mesh.face_uvs = mesh.faces;
     mesh.face_normals = mesh.faces;
 
-    assert(mesh.vertices.size() == 97000);
-    assert(mesh.faces.size() == num_tris);
+    TEST_ASSERT(mesh.vertices.size() == 97000);
+    TEST_ASSERT(mesh.faces.size() == num_tris);
 
     // Run partitioner with 64,000 threshold
     auto submeshes = grn::split_mesh_16bit(mesh, 64000);
@@ -54,7 +61,7 @@ static void test_split_97k_mesh() {
     std::cout << "  Original: 97,000 vertices, " << mesh.faces.size() << " triangles.\n";
     std::cout << "  Partitioned into " << submeshes.size() << " sub-meshes.\n";
 
-    assert(submeshes.size() >= 2);
+    TEST_ASSERT(submeshes.size() >= 2);
 
     size_t total_faces = 0;
     for (size_t i = 0; i < submeshes.size(); ++i) {
@@ -64,8 +71,8 @@ static void test_split_97k_mesh() {
                   << sm.faces.size() << " triangles.\n";
 
         // Every submesh must strictly obey 16-bit Granny limit
-        assert(sm.vertices.size() <= 64000);
-        assert(!sm.faces.empty());
+        TEST_ASSERT(sm.vertices.size() <= 64000);
+        TEST_ASSERT(!sm.faces.empty());
         total_faces += sm.faces.size();
 
         // Check index validity
@@ -76,9 +83,9 @@ static void test_split_97k_mesh() {
         }
 
         // Check normals, uvs, and weights consistency
-        assert(sm.normals.size() == sm.vertices.size());
-        assert(sm.uvs.size() == sm.vertices.size());
-        assert(sm.weights.size() == sm.vertices.size());
+        TEST_ASSERT(sm.normals.size() == sm.vertices.size());
+        TEST_ASSERT(sm.uvs.size() == sm.vertices.size());
+        TEST_ASSERT(sm.weights.size() == sm.vertices.size());
     }
 
     // Export sample 97k GLB fixture for UI and converter verification
@@ -125,11 +132,11 @@ static void test_model_optimizer_roundtrip() {
 
     // Verify Granny 1.2b writer succeeds and parser reads it back
     auto grn_data = grn::write_grn_memory(model);
-    assert(!grn_data.empty());
+    TEST_ASSERT(!grn_data.empty());
 
     auto parsed = grn::parse_grn_memory(grn_data.data(), grn_data.size());
-    assert(parsed.has_value());
-    assert(parsed->meshes.size() == model.meshes.size());
+    TEST_ASSERT(parsed.has_value());
+    TEST_ASSERT(parsed->meshes.size() == model.meshes.size());
 
     std::cout << "  ✓ Successfully serialized and parsed " << parsed->meshes.size()
               << " partitioned Granny 1.2b meshes.\n";
@@ -164,11 +171,10 @@ static void test_multi_material_tri_groups_split() {
         grn::GrnTriGroup g;
         g.material_index = mat_id;
         g.material_name = mat_name;
-        uint32_t num_t = (num_v - 2) / 2;
-        for (uint32_t t = 0; t < num_t; ++t) {
-            uint32_t v0 = start_v + t * 2;
-            uint32_t v1 = start_v + t * 2 + 1;
-            uint32_t v2 = start_v + t * 2 + 2;
+        for (uint32_t t = 0; t + 2 < num_v; ++t) {
+            uint32_t v0 = start_v;
+            uint32_t v1 = start_v + t + 1;
+            uint32_t v2 = start_v + t + 2;
             g.faces.push_back({ v0, v1, v2 });
             g.face_normals.push_back({ v0, v1, v2 });
             g.face_uvs.push_back({ v0, v1, v2 });
@@ -185,18 +191,18 @@ static void test_multi_material_tri_groups_split() {
     mesh.tri_groups.push_back(make_group(count0 + count1, count2, 2, "arm"));
 
     auto parts = grn::split_mesh_16bit(mesh, 64000);
-    assert(parts.size() == 2);
+    TEST_ASSERT(parts.size() == 2);
 
     // Part 0 should cleanly contain legs (30k) + body (20k) = 50k <= 64k
-    assert(parts[0].vertices.size() == count0 + count1);
-    assert(parts[0].tri_groups.size() == 2);
-    assert(parts[0].tri_groups[0].material_name == "legs");
-    assert(parts[0].tri_groups[1].material_name == "body");
+    TEST_ASSERT(parts[0].vertices.size() == count0 + count1);
+    TEST_ASSERT(parts[0].tri_groups.size() == 2);
+    TEST_ASSERT(parts[0].tri_groups[0].material_name == "legs");
+    TEST_ASSERT(parts[0].tri_groups[1].material_name == "body");
 
     // Part 1 should cleanly contain arm (35k) <= 64k
-    assert(parts[1].vertices.size() == count2);
-    assert(parts[1].tri_groups.size() == 1);
-    assert(parts[1].tri_groups[0].material_name == "arm");
+    TEST_ASSERT(parts[1].vertices.size() == count2);
+    TEST_ASSERT(parts[1].tri_groups.size() == 1);
+    TEST_ASSERT(parts[1].tri_groups[0].material_name == "arm");
 
     std::cout << "  ✓ Multi-material tri_groups partitioned with 0 cuts: "
               << "Part 0 has " << parts[0].tri_groups.size() << " groups (" << parts[0].vertices.size() << " verts), "
@@ -234,13 +240,13 @@ static void test_synthetic_mesh_decimation() {
     mesh.face_normals = mesh.faces;
 
     size_t orig_faces = mesh.faces.size();
-    assert(orig_faces == (grid_dim - 1) * (grid_dim - 1) * 2);
+    TEST_ASSERT(orig_faces == (grid_dim - 1) * (grid_dim - 1) * 2);
 
     bool decimated = grn::decimate_mesh(mesh, 0.5f, 3000);
-    assert(decimated);
+    TEST_ASSERT(decimated);
     (void)decimated;
-    assert(mesh.faces.size() < orig_faces);
-    assert(mesh.faces.size() <= 3000);
+    TEST_ASSERT(mesh.faces.size() < orig_faces);
+    TEST_ASSERT(mesh.faces.size() <= 3000);
     std::cout << "  ✓ Decimation reduced " << orig_faces << " tris to " << mesh.faces.size() << " tris.\n";
 }
 

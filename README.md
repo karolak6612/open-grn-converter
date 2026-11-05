@@ -143,10 +143,9 @@ open-grn-converter/
 │   │   ├── log_drawer.cpp     # Collapsible real-time color-coded logging console
 │   │   └── viewer/            # Embedded 3D Dual-Viewport OpenGL Engine
 │   │       ├── model_viewer_panel.cpp # Viewport toolbar, single/split mode, camera controls
-│   │       ├── gl_viewport_widget.cpp # OpenGL widget, shaders, grid, skeleton rendering
+│   │       ├── viewport_widget.cpp    # OpenGL widget, shaders, grid, skeleton rendering
 │   │       ├── playback_bar.cpp       # Animation timeline scrubber, play/pause, speed
 │   │       ├── skinning_engine.cpp    # CPU skinning and vertex transformation pipeline
-│   │       ├── grn_anim_sampler.cpp   # Cubic spline / linear animation keyframe sampler
 │   │       └── camera.cpp             # Arcball orbit camera with pan and zoom
 │   └── main.cpp               # Application launcher (auto-dispatches GUI vs CLI)
 │
@@ -163,6 +162,8 @@ open-grn-converter/
     ├── test_texture_hue.cpp   # Texture manipulation & pipeline verification
     ├── test_viewer_compat.cpp # Live debugger tests verifying 0 crashes in Granny viewer
     ├── test_optimizer.cpp     # 16-bit mesh partitioner & multi-material split tests
+    ├── test_stress_detect.cpp # Coordinate system & bounding-box stress tests
+    ├── test_challenger_adversarial.cpp # Adversarial orientation challenger tests
     └── test_viewer_engine.cpp # 3D viewport, skinning, and animation engine tests
 ```
 
@@ -186,7 +187,7 @@ cmake --preset release
 # Build Release executable and test suite
 cmake --build --preset release
 
-# Run automated tests (all 8 targets)
+# Run automated tests (all 10 targets)
 ctest --preset release --output-on-failure
 ```
 

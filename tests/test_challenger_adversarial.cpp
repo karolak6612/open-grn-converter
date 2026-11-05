@@ -19,12 +19,16 @@ struct TestCaseResult {
 };
 
 static std::vector<TestCaseResult> results;
+static int failure_count = 0;
 
-static void record(const std::string& cat, const std::string& name, bool res, const std::string& notes = "") {
+static void record(const std::string& cat, const std::string& name, bool res, const std::string& notes = "", bool expected = true) {
     results.push_back({cat, name, res, notes});
+    bool pass = (res == expected);
+    if (!pass) ++failure_count;
     std::cout << std::left << std::setw(25) << ("[" + cat + "]")
               << std::setw(35) << name
               << " -> " << (res ? "Z-up (true)" : "Y-up (false)")
+              << (pass ? " [PASS]" : " [FAIL!]")
               << (notes.empty() ? "" : " | " + notes)
               << std::endl;
 }
@@ -181,8 +185,8 @@ int main() {
     }
 
     std::cout << "\n=================================================================\n";
-    std::cout << "   STRESS TEST COMPLETE: " << results.size() << " cases evaluated\n";
+    std::cout << "   STRESS TEST COMPLETE: " << results.size() << " cases evaluated, " << failure_count << " failures\n";
     std::cout << "=================================================================\n";
 
-    return 0;
+    return (failure_count == 0) ? 0 : 1;
 }

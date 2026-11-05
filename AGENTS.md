@@ -37,7 +37,7 @@ Before making any modifications or investigating issues, ground yourself in **ve
    cmake --build --preset release
    ctest --preset release --output-on-failure
    ```
-   Confirm all 8 test targets pass (`test_codecs`, `test_parser`, `test_writer`, `test_roundtrip`, `test_texture_hue`, `test_viewer_compat`, `test_optimizer`, `test_viewer_engine`).
+   Confirm all 10 test targets pass (`test_codecs`, `test_parser`, `test_writer`, `test_roundtrip`, `test_texture_hue`, `test_viewer_compat`, `test_optimizer`, `test_stress_detect`, `test_challenger_adversarial`, `test_viewer_engine`).
 3. **Evidence over assumptions**:
    - **Nothing written in documentation is evidence until re-verified.** Always re-run the specific CLI command, CTest, or validator probe to substantiate any claim.
    - Classify all conclusions strictly:
@@ -101,7 +101,8 @@ open-grn-converter/
 │   │   ├── converter.h        # High-level convert_grn_to_glb / convert_glb_to_grn API
 │   │   ├── converter.cpp      # Coordinate transforms, IBM calculations, anim merging
 │   │   ├── anim_optimizer.h/.cpp # Keyframe resampling, micro-bone culling, loop-safe clamping
-│   │   └── mesh_optimizer.h/.cpp # 16-bit safe mesh partitioner and QEM decimation
+│   │   ├── mesh_optimizer.h/.cpp # 16-bit safe mesh partitioner and QEM decimation
+│   │   └── grn_anim_sampler.h/.cpp # Cubic spline / linear animation keyframe sampler
 │   ├── core/                  # Granny 1.2b Binary Container Engine
 │   │   ├── grn_types.h        # 0xCA5E chunk constants, section headers, GrnModel structures
 │   │   ├── grn_parser.h/.cpp  # Recursive binary chunk parser, skeleton/mesh/anim decoding
@@ -119,10 +120,9 @@ open-grn-converter/
 │       ├── log_drawer.h/.cpp  # Collapsible real-time color-coded logging console
 │       └── viewer/            # Embedded 3D Dual-Viewport OpenGL Engine
 │           ├── model_viewer_panel.h/.cpp # Viewport toolbar, single/split mode, camera controls
-│           ├── gl_viewport_widget.h/.cpp # OpenGL widget, shaders, grid, skeleton rendering
+│           ├── viewport_widget.h/.cpp    # OpenGL widget, shaders, grid, skeleton rendering
 │           ├── playback_bar.h/.cpp       # Animation timeline scrubber, play/pause, speed
 │           ├── skinning_engine.h/.cpp    # CPU skinning and vertex transformation pipeline
-│           ├── grn_anim_sampler.h/.cpp   # Cubic spline / linear animation keyframe sampler
 │           └── camera.h/.cpp             # Arcball orbit camera with pan and zoom
 │
 ├── resources/                 # Application Resources
@@ -144,6 +144,8 @@ open-grn-converter/
     ├── test_texture_hue.cpp   # Texture color channel transformations & filtering
     ├── test_viewer_compat.cpp # Live debugger tests verifying 0 crashes in Granny viewer
     ├── test_optimizer.cpp     # 16-bit mesh partitioner & multi-material split tests
+    ├── test_stress_detect.cpp # Coordinate system & bounding-box stress tests
+    ├── test_challenger_adversarial.cpp # Adversarial orientation challenger tests
     └── test_viewer_engine.cpp # 3D viewport, skinning, and animation engine tests
 ```
 
