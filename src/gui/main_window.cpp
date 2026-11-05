@@ -194,10 +194,20 @@ struct MainWindow::Impl {
         auto* helpMenu = menuBar->addMenu(owner.tr("&Help"));
         helpMenu->addAction(makeThemedIcon(Icons16::Misc_Help), owner.tr("&About GRN Converter..."), [this]() {
             oclero::qlementine::AboutDialog dlg(&owner);
+            dlg.setIcon(owner.windowIcon());
             dlg.setApplicationName(owner.tr("GRN <-> GLB Converter"));
-            dlg.setDescription(owner.tr("Production C++20 Bidirectional Granny 1.2b and glTF 2.0 Converter.\n"
-                                        "Engineered with Qt6 and Qlementine Modern Theme."));
             dlg.setApplicationVersion("1.0.0");
+            dlg.setDescription(owner.tr(
+                "High-performance standalone C++20 bidirectional conversion suite between "
+                "Granny 1.2b (.grn) and glTF 2.0 (.glb / .gltf).\n\n"
+                "Engineered with Qt6 and Qlementine Modern Theme.\n"
+                "Includes 3D Dual-Viewport OpenGL inspection, real-time skeletal animation engine, "
+                "CPU skinning, 16-bit mesh partitioner, and native VTex texture codecs."
+            ));
+            dlg.setWebsiteUrl("https://github.com/karolak6612/open-grn-converter");
+            dlg.setLicense("MIT License");
+            dlg.setCopyright("Copyright (c) 2024-2026 Karol & Contributors");
+            dlg.addSocialMediaLink(owner.tr("GitHub Repository"), "https://github.com/karolak6612/open-grn-converter");
             dlg.exec();
         });
     }

@@ -1,4 +1,4 @@
-# GRN $\longleftrightarrow$ GLB Converter
+# GRN <-> GLB Converter
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Standard: C++20](https://img.shields.io/badge/C%2B%2B-20-blue.svg)](https://en.wikipedia.org/wiki/C%2B%2B20)
@@ -6,7 +6,7 @@
 [![Target: Granny 1.2b](https://img.shields.io/badge/Format-Granny%201.2b-orange.svg)]()
 [![Target: glTF 2.0](https://img.shields.io/badge/Format-glTF%202.0%20%2F%20GLB-brightgreen.svg)](https://www.khronos.org/gltf/)
 
-**GRN $\longleftrightarrow$ GLB Converter** is a high-performance C++20 standalone bidirectional 3D asset conversion suite between **Granny 1.2b (`.grn`)** binary containers and modern industry-standard **glTF 2.0 (`.glb` / `.gltf`)** models.
+**GRN <-> GLB Converter** is a high-performance C++20 standalone bidirectional 3D asset conversion suite between **Granny 1.2b (`.grn`)** binary containers and modern industry-standard **glTF 2.0 (`.glb` / `.gltf`)** models.
 
 ---
 
@@ -22,7 +22,8 @@
 
 ---
 
-<img width="1194" height="738" alt="obraz" src="https://github.com/user-attachments/assets/9d972cab-be1c-4e99-9c7c-a8f0ac66a84d" />
+[PUT SCREEN HERE]
+*Main Overview: Dual-Viewport Split View with Model Rig & Animation Timeline*
 
 ---
 
@@ -31,7 +32,7 @@
 - **Full C++20 Native Pipeline**: High-speed, bit-accurate processing with zero external runtimes or interpreter dependencies.
 - **Bidirectional Conversion**:
   - `GRN -> GLB`: Parses Granny 1.2b binary chunks into self-contained binary glTF 2.0 with meshes, bone hierarchies, skinning weights, animations, and embedded PBR materials.
-  - `GLB -> GRN`: Serializes modern glTF models into bit-accurate Granny 1.2b relational chunk hierarchies (`0xCA5E0000`–`0xCA5EFFFF`), relocation footers, and Section 0 headers.
+  - `GLB -> GRN`: Serializes modern glTF models into bit-accurate Granny 1.2b relational chunk hierarchies (`0xCA5E0000`-`0xCA5EFFFF`), relocation footers, and Section 0 headers.
 - **Skeletal Rigging & Weights**: Full reconstruction of bone linkages, local TRS transforms, Inverse Bind Matrices (IBM), and normalized 4-weight skinning influences (`JOINTS_0`, `WEIGHTS_0`).
 - **Animation Sequencing & Split Clips**:
   - Decodes and encodes split keyframe tracks (position, quaternion rotation, scale-shear) and interleaved tracks with high-fidelity interpolation.
@@ -39,8 +40,8 @@
   - Automatic split animation pipeline (`--split-anims`): exports base mesh with skeleton, plus standalone animation clip containers matching game engine expectations.
 - **Animation Optimization Pipeline**:
   - **Uniform FPS Resampling**: Resamples non-uniform keyframes to clean fixed intervals (e.g. 30, 20, 15 FPS) to eliminate frame-step jitter.
-  - **Micro-Bone Culling**: Prunes tracks whose maximum angular delta is below a user-defined threshold (e.g. 3.0°), stripping twitchy or imperceptible bone motion.
-  - **Loop-Safe Clamping**: Ensures exact duplicate keyframes at $t_{end}$, preventing edge artifacts and jumps in game looping clips.
+  - **Micro-Bone Culling**: Prunes tracks whose maximum angular delta is below a user-defined threshold (e.g. 3.0 deg), stripping twitchy or imperceptible bone motion.
+  - **Loop-Safe Clamping**: Ensures exact duplicate keyframes at loop boundaries, preventing edge artifacts and jumps in game looping clips.
   - **Static Channel Pruning**: Automatically removes zero-movement transform tracks to reduce file size and vertex processing overhead.
 - **16-Bit Safe High-Poly Mesh Partitioner (`--optimizer`)**:
   - Automatically partitions meshes exceeding 64,000 vertices into 16-bit compliant sub-meshes with isolated bone palettes.
@@ -54,6 +55,89 @@
 - **Dual Interface Modes**:
   - **Modern Qt6 / Qlementine GUI**: Fluent / macOS dark design system, 3D Dual-Viewport, animation player, bone inspector, model cards, and real-time logging.
   - **High-Speed CLI**: Headless command-line utility for automated batch conversions, modding scripts, and CI/CD pipelines.
+
+---
+
+## Graphical User Interface (GUI) Tour
+
+### 1. Main Window Overview
+
+The desktop interface provides a centralized workspace featuring a top toolbar, model tabs (`GRN -> GLB` and `GLB -> GRN`), dual 3D viewports, conversion configuration panels, skeletal tree inspector, and a collapsible real-time logging drawer.
+
+[PUT SCREEN HERE]
+*Figure 1: Main application window overview in Split View mode.*
+
+### 2. 3D Dual-Viewport (Single View & Split View)
+
+The embedded OpenGL 3D viewport engine supports two viewing modes:
+- **Split View**: Displays the Source model on the left and the Converted Target model on the right with synchronized arcball camera controls, allowing instant side-by-side verification of geometry, rigging, and textures.
+- **Single View**: Expands the active viewport to full size for focused inspection.
+- **Viewport Controls**: Interactive toggles for Wireframe overlay, Ground Grid, Skeletal Joints & Bone links, Bone Name Labels, and Shading modes (Textured, Normals, Unlit).
+
+[PUT SCREEN HERE]
+*Figure 2: 3D Dual-Viewport comparing Source and Converted models.*
+
+### 3. Real-Time Animation Player & Timeline
+
+The bottom playback bar provides full skeletal animation scrubbing and evaluation:
+- Play, Pause, Rewind, and Loop toggle controls.
+- Interactive timeline scrubber displaying current playback time, total clip duration, and frame count.
+- Adjustable playback speed multipliers (0.25x, 0.5x, 1.0x, 1.5x, 2.0x).
+- Hardware-efficient CPU skinning with dirty-flag caching to avoid redundant recalculation when paused.
+
+[PUT SCREEN HERE]
+*Figure 3: Animation playback bar with timeline scrubber and speed controls.*
+
+### 4. Interactive Skeletal Hierarchy & Bone Inspector
+
+The right panel features a hierarchical skeletal tree visualizer:
+- Expandable parent-child joint tree with real-time bone counts.
+- Search filter to instantly locate specific bones by name in complex rigs.
+- Real-time transform readouts displaying local translation (X, Y, Z), quaternion rotation (X, Y, Z, W), and scale.
+- 3D joint badge overlays projecting bone names directly into the 3D viewport.
+
+[PUT SCREEN HERE]
+*Figure 4: Searchable skeletal hierarchy tree and joint transform inspector.*
+
+### 5. Model Inspection & Metadata Cards
+
+Visual cards provide an instant breakdown of loaded 3D models:
+- **Geometry**: Total vertex count, triangle face count, sub-mesh partition count.
+- **Skeleton**: Active joint count, root bone identifiers, rest pose validity.
+- **Materials**: Material definitions, diffuse color, shininess, shader attributes.
+- **Textures**: Embedded vs loose texture status, dimensions, pixel format, mip levels.
+
+[PUT SCREEN HERE]
+*Figure 5: Model statistics cards for geometry, skeleton, materials, and textures.*
+
+### 6. Conversion Options & Optimization Settings
+
+Detailed conversion parameters can be configured per model:
+- **Scaling**: Uniform scale factor or automatic Target Height calculation in game units.
+- **Animation Optimization**: Resample keyframes to target FPS (30, 20, 15), cull micro-bone motion below a custom angular threshold, and preserve loop boundaries.
+- **Split Animation Pipeline**: Export clips as separate `.grn` files (`--split-anims`) or merge external `.grn` animation tracks.
+- **Mesh Optimization**: Automatic 16-bit safe sub-mesh partitioning for high-poly models.
+- **Texture Export**: Embed textures into GLB or write loose PNG / TGA / VTex files.
+
+[PUT SCREEN HERE]
+*Figure 6: Export options widget with animation optimization and scaling controls.*
+
+### 7. Fluent Light & Dark Themes
+
+Powered by Qlementine and Qlementine-Icons, the GUI includes natively styled themes:
+- **Light Theme**: Clean, high-contrast fluent theme suitable for bright environments.
+- **Dark Theme**: Focused, low-glare dark theme optimized for 3D viewport work.
+- Smooth animated transitions and custom vector SVG icons.
+
+[PUT SCREEN HERE]
+*Figure 7: Light and Dark theme modes side-by-side.*
+
+### 8. About Dialog
+
+The Help menu provides application metadata, copyright notices, license details, and direct links to the project repository.
+
+[PUT SCREEN HERE]
+*Figure 8: Application About dialog.*
 
 ---
 
@@ -76,7 +160,7 @@ add_library(grn_core STATIC
 )
 ```
 
-`grn_core.lib` is **not** an external or proprietary library — it is our internal static library target compiled directly from `src/`. It is intentionally built as a **static library (`.lib`)** rather than a **dynamic shared library (`.dll`)** for key technical reasons:
+`grn_core.lib` is **not** an external or proprietary library - it is our internal static library target compiled directly from `src/`. It is intentionally built as a **static library (`.lib`)** rather than a **dynamic shared library (`.dll`)** for key technical reasons:
 
 1. **Self-Contained Executable**:
    - Compiling statically embeds all parsing, conversion, and codec code directly inside `grn_converter.exe`.
@@ -134,7 +218,7 @@ open-grn-converter/
 │   ├── core/                  # Binary GRN parser and serializer (Granny 1.2b chunks)
 │   ├── gltf/                  # glTF 2.0 / GLB reader (cgltf) and writer
 │   ├── gui/                   # Qt6 + Qlementine UI
-│   │   ├── main_window.cpp    # Modern main window shell and layout
+│   │   ├── main_window.cpp    # Modern main window shell, menu bar, and layout
 │   │   ├── bone_inspector_widget.cpp # Skeletal tree and transform inspector
 │   │   ├── glb_options_widget.cpp    # glTF / GLB export parameters & animation optimization
 │   │   ├── grn_options_widget.cpp    # Granny 1.2b export options & anim merge list
@@ -149,12 +233,12 @@ open-grn-converter/
 │   │       └── camera.cpp             # Arcball orbit camera with pan and zoom
 │   └── main.cpp               # Application launcher (auto-dispatches GUI vs CLI)
 │
-├── resources/                 # Application assets (icon.ico, icon.png, .rc file)
+├── resources/                 # Application assets (icon.ico, icon.png, .rc file, themes.qrc)
 ├── third_party/cgltf/         # Header-only C glTF 2.0 parsing and writing library
 ├── validator/                 # Khronos glTF Validator for official compliance checks
 │
 ├── test_grn/                  # Test assets (models, animations, GLB references)
-└── tests/                     # C++ automated CTest suite:
+└── tests/                     # C++ automated CTest suite (10 test targets):
     ├── test_codecs.cpp        # DXT1, TGA, PNG, and VTex codec tests
     ├── test_parser.cpp        # GRN binary container chunk parser & weight tests
     ├── test_writer.cpp        # GRN container serializer tests
@@ -234,35 +318,6 @@ Launch `grn_converter.exe` directly or pass `--gui`:
 ```bash
 ./build/Release/grn_converter.exe
 ```
-
-**GUI Capabilities**:
-- **3D Dual-Viewport Model Viewer**:
-  - Embedded OpenGL rendering with real-time arcball orbit camera, pan, and zoom.
-  - Side-by-side **Split View** (comparing Source model against Converted output model) with synchronized camera controls.
-  - **Single View** for full-focus model inspection.
-  - Display toggles for Wireframe, Ground Grid, Skeletal Joints/Bones, Bone Name Labels, and Shading modes (Textured, Normals, Unlit).
-- **Real-Time Animation Player**:
-  - Interactive playback bar with Play, Pause, Rewind, and Loop toggle.
-  - Interactive timeline scrubber with current time and duration readout.
-  - Variable speed playback multipliers (0.25x, 0.5x, 1.0x, 1.5x, 2.0x).
-- **Interactive Bone Inspector**:
-  - Hierarchical skeletal tree showing parent-child joint linkages.
-  - Live search filter to quickly find specific bones in complex rigs.
-  - Real-time 3D coordinate inspection (local position, quaternion rotation, scale).
-- **Source & Target Inspection Cards**:
-  - Instant visual breakdown of Geometry (vertex count, face count, sub-mesh parts).
-  - Skeleton inspection (bone count, root joints).
-  - Material list and embedded/loose Texture visualizers.
-- **Conversion Settings**:
-  - Output format toggle (`.grn` $\longleftrightarrow$ `.glb`).
-  - Scaling controls: Uniform scale multiplier or automatic Target Height calculation in game units.
-  - Animation optimization toggles: Target FPS resampling (Auto / 30 / 20 / 15 FPS) and micro-bone angular culling.
-  - Animation split controls (`--split-anims`) or external animation merging.
-  - 16-bit safe sub-mesh partitioning toggle.
-- **Integrated Logging Console**:
-  - Collapsible bottom drawer with color-coded log entries (Info, Warning, Error) and auto-scroll.
-
----
 
 ### 2. Command Line Interface (CLI)
 
@@ -344,7 +399,7 @@ Run the automated CTest suite from the build folder:
 ctest --test-dir build -C Release --output-on-failure
 ```
 
-### Test Suite Overview
+### Test Suite Overview (All 10 Verification Targets)
 
 | Test Name | Source File | Description |
 |---|---|---|
@@ -355,6 +410,8 @@ ctest --test-dir build -C Release --output-on-failure
 | `test_texture_hue` | `tests/test_texture_hue.cpp` | Texture pipeline validation and color channel transformations |
 | `test_viewer_compat` | `tests/test_viewer_compat.cpp` | Runs exported models under the original Granny viewer to ensure 0 crashes |
 | `test_optimizer` | `tests/test_optimizer.cpp` | 16-bit mesh partitioner, multi-material splitting, and QEM decimation |
+| `test_stress_detect` | `tests/test_stress_detect.cpp` | Coordinate space swizzling, TRS transforms, and bounding-box stress tests |
+| `test_challenger_adversarial` | `tests/test_challenger_adversarial.cpp` | Adversarial bone ordering, forward-reference prevention, and cycle detection |
 | `test_viewer_engine` | `tests/test_viewer_engine.cpp` | 3D viewport, CPU skinning engine, animation sampler, and orbit camera |
 
 ---
