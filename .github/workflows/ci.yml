@@ -96,10 +96,28 @@ jobs:
           
           if ($windeployqt) {
               Write-Host "Running windeployqt: $windeployqt"
-              & $windeployqt --no-compiler-runtime --no-opengl-sw --no-translations "$dist/grn_converter.exe"
+              & $windeployqt --no-translations "$dist/grn_converter.exe"
           }
           
-          # 4. Copy Qt6 DLLs and plugin directories
+          # 4. Copy VC++ runtime DLLs (MSVC CRT) if available
+          $vcRedist = Get-ChildItem -Path "$env:ProgramFiles/Microsoft Visual Studio" -Filter "msvcp140.dll" -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.FullName -match 'x64' -and $_.FullName -notmatch 'onecore' } | Select-Object -First 1
+          if ($vcRedist) {
+              $redistDir = $vcRedist.DirectoryName
+              Get-ChildItem -Path $redistDir -Filter "*.dll" | ForEach-Object {
+                  if (-not (Test-Path "$dist/$($_.Name)")) {
+                      Copy-Item $_.FullName -Destination "$dist/" -Force
+                  }
+              }
+          }
+
+          # 5. Copy Qlementine style plugin if present
+          $qlementinePlugin = Get-ChildItem -Path "build" -Filter "qlementinestyleplugin.dll" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($qlementinePlugin) {
+              if (-not (Test-Path "$dist/styles")) { New-Item -ItemType Directory -Path "$dist/styles" -Force | Out-Null }
+              Copy-Item $qlementinePlugin.FullName -Destination "$dist/styles/" -Force
+          }
+          
+          # 6. Copy Qt6 DLLs and plugin directories
           Get-ChildItem "build/Release" -Filter "Qt6*.dll" -File -ErrorAction SilentlyContinue | ForEach-Object {
               if (-not (Test-Path "$dist/$($_.Name)")) {
                   Copy-Item $_.FullName -Destination "$dist/" -Force
@@ -113,7 +131,7 @@ jobs:
               }
           }
           
-          # 5. Clean intermediate/debug files
+          # 7. Clean intermediate/debug files
           Get-ChildItem -Path $dist -Filter "test_*.exe" -Recurse | Remove-Item -Force
           Get-ChildItem -Path $dist -Filter "*.pdb" -Recurse | Remove-Item -Force
           Get-ChildItem -Path $dist -Filter "*.ilk" -Recurse | Remove-Item -Force
@@ -123,19 +141,15 @@ jobs:
               Remove-Item -Recurse -Force "$dist/test_grn"
           }
           
-          # 6. Copy documentation and license
+          # 8. Copy documentation and license
           Copy-Item "README.md" -Destination "$dist/" -Force
           Copy-Item "LICENSE" -Destination "$dist/" -Force
-          
-          # 7. Create compressed zip archive
-          Compress-Archive -Path "$dist/*" -DestinationPath "open-grn-converter-windows-x64.zip" -Force
-          Move-Item -Path "open-grn-converter-windows-x64.zip" -Destination "$dist/" -Force
 
       - name: Upload Workflow Artifact
         uses: actions/upload-artifact@v4
         with:
           name: open-grn-converter-windows-x64
-          path: dist/open-grn-converter-windows-x64.zip
+          path: dist/
           if-no-files-found: error
 
   build-linux:
@@ -196,14 +210,12 @@ jobs:
           cp build/grn_converter dist/
           cp README.md dist/
           cp LICENSE dist/
-          tar -czvf open-grn-converter-linux-x64.tar.gz -C dist grn_converter README.md LICENSE
-          mv open-grn-converter-linux-x64.tar.gz dist/
 
       - name: Upload Workflow Artifact
         uses: actions/upload-artifact@v4
         with:
           name: open-grn-converter-linux-x64
-          path: dist/open-grn-converter-linux-x64.tar.gz
+          path: dist/
           if-no-files-found: error
 
   publish-release:
@@ -218,13 +230,19 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: open-grn-converter-windows-x64
-          path: release_assets/
+          path: release_assets/windows_dist/
 
       - name: Download Linux Artifact
         uses: actions/download-artifact@v4
         with:
           name: open-grn-converter-linux-x64
-          path: release_assets/
+          path: release_assets/linux_dist/
+
+      - name: Package Release Archives
+        run: |
+          sudo apt-get update && sudo apt-get install -y zip
+          cd release_assets/windows_dist && zip -r ../open-grn-converter-windows-x64.zip . && cd ../..
+          cd release_assets/linux_dist && chmod +x grn_converter && tar -czvf ../open-grn-converter-linux-x64.tar.gz . && cd ../..
 
       - name: Publish Release to GitHub
         env:
