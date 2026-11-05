@@ -127,6 +127,8 @@ private:
     bool is_looping_{ true };
     float playback_speed_{ 1.0f };
     float current_time_{ 0.0f };
+    float last_evaluated_time_{ -1.0f };
+    bool skinning_dirty_{ true };
 
     QTimer* frame_timer_{ nullptr };
     QElapsedTimer elapsed_timer_;

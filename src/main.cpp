@@ -79,12 +79,24 @@ int main(int argc, char* argv[]) {
         } else if (arg == "--embed-textures" && i + 1 < argc) {
             embed_textures_opt = (std::string(argv[++i]) != "0");
         } else if (arg == "--tab" && i + 1 < argc) {
-            active_tab_opt = std::stoi(argv[++i]);
+            try {
+                active_tab_opt = std::stoi(argv[++i]);
+            } catch (...) {
+                std::cerr << "Invalid integer value for --tab" << std::endl;
+            }
         } else if (arg == "--right-tab" && i + 1 < argc) {
-            right_tab_opt = std::stoi(argv[++i]);
+            try {
+                right_tab_opt = std::stoi(argv[++i]);
+            } catch (...) {
+                std::cerr << "Invalid integer value for --right-tab" << std::endl;
+            }
         } else if (arg == "--select-anim" && i + 1 < argc) {
-            select_anim_opt = std::stoi(argv[++i]);
-            force_gui = true;
+            try {
+                select_anim_opt = std::stoi(argv[++i]);
+                force_gui = true;
+            } catch (...) {
+                std::cerr << "Invalid integer value for --select-anim" << std::endl;
+            }
         }
     }
 

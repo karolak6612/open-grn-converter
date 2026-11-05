@@ -123,6 +123,9 @@ struct MainWindow::Impl {
         QObject::connect(worker, &ConversionWorker::conversionFinished, &owner, [this](bool ok, const QString& summary) {
             onFinished(ok, summary);
         });
+        QObject::connect(worker, &QThread::finished, &owner, [this]() {
+            updateActionState();
+        });
 
         setupMenuBar();
         setupNavBar();
@@ -287,7 +290,10 @@ struct MainWindow::Impl {
         inputEdit->setClearButtonEnabled(true);
         inputEdit->setFixedHeight(24);
         QObject::connect(inputEdit, &oclero::qlementine::LineEdit::textChanged, &owner, [this]() {
-            onInputPathChanged();
+            QString p = inputEdit->text().trimmed();
+            if (p.isEmpty() || (QFileInfo::exists(p) && QFileInfo(p).isFile())) {
+                onInputPathChanged();
+            }
         });
         inRow->addWidget(inputEdit, 1);
 
@@ -327,7 +333,6 @@ struct MainWindow::Impl {
             bool zUp = grnOptions->convertCoordinates();
             if (modelViewer) {
                 if (modelViewer->sourceViewport()) modelViewer->sourceViewport()->setZUpMode(zUp);
-                if (modelViewer->targetViewport()) modelViewer->targetViewport()->setZUpMode(zUp);
             }
             if (targetInfoWidget) targetInfoWidget->markOutdated(true);
         });
@@ -345,7 +350,6 @@ struct MainWindow::Impl {
             bool zUp = glbOptions->convertCoordinates();
             if (modelViewer) {
                 if (modelViewer->sourceViewport()) modelViewer->sourceViewport()->setZUpMode(zUp);
-                if (modelViewer->targetViewport()) modelViewer->targetViewport()->setZUpMode(zUp);
             }
             if (targetInfoWidget) targetInfoWidget->markOutdated(true);
         });
@@ -550,9 +554,6 @@ struct MainWindow::Impl {
 
     void updateModelInOptions() {
         QString path = inputEdit->text().trimmed();
-        grnOptions->setModel(path);
-        glbOptions->setModel(path);
-        updateBadges();
 
         loadedModel.reset();
         cachedExternalAnimModel.reset();
@@ -567,6 +568,7 @@ struct MainWindow::Impl {
             modelViewer->loadTargetModel(nullptr, QString());
         }
 
+        bool isGrn = (navBar->currentIndex() == 0);
         if (!path.isEmpty()) {
             QFileInfo fi(path);
             if (fi.exists() && fi.isFile()) {
@@ -582,9 +584,15 @@ struct MainWindow::Impl {
             }
         }
 
+        if (isGrn) {
+            grnOptions->setModel(path);
+        } else {
+            glbOptions->setModel(path);
+        }
+        updateBadges();
+
         if (loadedModel) {
             QFileInfo fi(path);
-            bool isGrn = (navBar->currentIndex() == 0);
             bool isZUp = detect_is_z_up(*loadedModel);
             bool shouldConvert = isGrn ? isZUp : !isZUp;
 
@@ -868,7 +876,7 @@ struct MainWindow::Impl {
             }
             if (grnOptions) grnOptions->selectAnimationItem(animIndex);
             if (glbOptions) glbOptions->selectAnimationItem(animIndex);
-        } else if (!clipPath.isEmpty()) {
+        } else if (animIndex == -2 && !clipPath.isEmpty()) {
             cachedExternalAnimModel = parse_grn_file(std::filesystem::path(clipPath.toStdWString()));
             if (cachedExternalAnimModel && !cachedExternalAnimModel->animations.empty()) {
                 QString clipStem = QFileInfo(clipPath).completeBaseName();
@@ -1003,7 +1011,7 @@ struct MainWindow::Impl {
         statusLabel->setText(owner.tr("Converting..."));
         updateActionState();
 
-        worker->setJob(false, inPath.toStdString(), outPath.toStdString(), opts);
+        worker->setJob(false, std::filesystem::path(inPath.toStdWString()), std::filesystem::path(outPath.toStdWString()), opts);
         worker->start();
     }
 
@@ -1024,6 +1032,9 @@ struct MainWindow::Impl {
         if (ok && !lastOutputPath.isEmpty()) {
             QFileInfo fi(lastOutputPath);
             if (fi.exists()) {
+                if (modelViewer) {
+                    modelViewer->loadTargetModel(nullptr, QString());
+                }
                 bool isGrnToGlb = (navBar->currentIndex() == 0);
                 if (isGrnToGlb) {
                     GlbImportOptions imp_opt;
@@ -1048,6 +1059,9 @@ struct MainWindow::Impl {
                         glbOptions->reemitCurrentAnimation();
                     }
                 } else {
+                    if (modelViewer) {
+                        modelViewer->loadTargetModel(nullptr, QString());
+                    }
                     targetInfoWidget->setTargetModel(nullptr, lastOutputPath, isGrnToGlb);
                     if (boneInspectorWidget) {
                         boneInspectorWidget->setTargetModel(nullptr);
@@ -1055,6 +1069,9 @@ struct MainWindow::Impl {
                 }
             }
         } else if (!ok) {
+            if (modelViewer) {
+                modelViewer->loadTargetModel(nullptr, QString());
+            }
             targetInfoWidget->clearTarget();
             if (boneInspectorWidget) {
                 boneInspectorWidget->setTargetModel(nullptr);

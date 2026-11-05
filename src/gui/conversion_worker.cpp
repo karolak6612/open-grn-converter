@@ -5,6 +5,13 @@ namespace grn {
 ConversionWorker::ConversionWorker(QObject* parent)
     : QThread(parent) {}
 
+ConversionWorker::~ConversionWorker() {
+    if (isRunning()) {
+        requestInterruption();
+        wait();
+    }
+}
+
 void ConversionWorker::setJob(bool is_batch,
                               const std::filesystem::path& input,
                               const std::filesystem::path& output,
@@ -22,7 +29,7 @@ void ConversionWorker::run() {
     auto cb = [this](const std::string& item, float prog, bool ok, const std::string& msg) {
         (void)item;
         emit progressUpdated(prog);
-        int lvl = ok ? (prog >= 1.0f ? 1 : 0) : 3; // 0=Info, 1=Success, 2=Warning, 3=Error
+        int lvl = ok ? 0 : 2; // 0=Info, 1=Warning, 2=Error
         emit logMessage(QString::fromStdString(msg), lvl);
     };
 

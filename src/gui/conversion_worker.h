@@ -12,7 +12,7 @@ class ConversionWorker : public QThread {
     Q_OBJECT
 public:
     explicit ConversionWorker(QObject* parent = nullptr);
-    ~ConversionWorker() override = default;
+    ~ConversionWorker() override;
 
     void setJob(bool is_batch,
                 const std::filesystem::path& input,

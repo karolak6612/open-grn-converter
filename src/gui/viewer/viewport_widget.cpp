@@ -18,7 +18,9 @@ ViewportWidget::ViewportWidget(QWidget* parent)
 
     frame_timer_ = new QTimer(this);
     QObject::connect(frame_timer_, &QTimer::timeout, this, [this]() {
-        update();
+        if (is_playing_ && skinning_.hasAnimation()) {
+            update();
+        }
     });
     frame_timer_->start(16); // ~60 FPS
     elapsed_timer_.start();
@@ -271,6 +273,8 @@ void ViewportWidget::loadModel(const GrnModel* model) {
     }
 
     current_time_ = 0.0f;
+    last_evaluated_time_ = -1.0f;
+    skinning_dirty_ = true;
     is_playing_ = false;
     emit playbackStateChanged(false);
     emit playbackTimeChanged(0.0f, skinning_.duration());
@@ -284,6 +288,9 @@ void ViewportWidget::playAnimation(const GrnAnimation* anim, const std::vector<G
     pending_anim_bones_ = anim_bones;
     skinning_.setAnimation(anim, anim_bones);
     current_time_ = 0.0f;
+    last_evaluated_time_ = -1.0f;
+    skinning_dirty_ = true;
+    elapsed_timer_.restart();
     is_playing_ = (anim != nullptr && skinning_.duration() > 0.0f);
     emit playbackStateChanged(is_playing_);
     emit playbackTimeChanged(0.0f, skinning_.duration());
@@ -297,6 +304,8 @@ void ViewportWidget::stopAnimation() {
     pending_anim_bones_ = nullptr;
     skinning_.clearAnimation();
     current_time_ = 0.0f;
+    last_evaluated_time_ = -1.0f;
+    skinning_dirty_ = true;
     is_playing_ = false;
     emit playbackStateChanged(false);
     emit playbackTimeChanged(0.0f, 0.0f);
@@ -307,12 +316,16 @@ void ViewportWidget::stopAnimation() {
 
 void ViewportWidget::setPlaying(bool playing) {
     is_playing_ = playing;
+    if (is_playing_) {
+        elapsed_timer_.restart();
+    }
     emit playbackStateChanged(is_playing_);
     update();
 }
 
 void ViewportWidget::setTime(float t) {
     current_time_ = std::clamp(t, 0.0f, skinning_.duration());
+    skinning_dirty_ = true;
     update();
 }
 
@@ -363,6 +376,7 @@ void ViewportWidget::setSelectedBone(int boneIndex) {
 
 void ViewportWidget::setModelScale(float s) {
     skinning_.setScale(s);
+    skinning_dirty_ = true;
     update();
 }
 
@@ -501,10 +515,14 @@ void ViewportWidget::paintGL() {
     }
 
     // 2. Evaluate skinning and update GPU vertex buffers
-    skinning_.evaluate(current_time_);
-    const auto& positions = skinning_.skinnedPositions();
-    for (size_t mi = 0; mi < meshes_.size() && mi < positions.size(); ++mi) {
-        meshes_[mi]->updatePositions(this, positions[mi], true);
+    if (skinning_dirty_ || std::abs(current_time_ - last_evaluated_time_) > 1e-4f) {
+        skinning_.evaluate(current_time_);
+        const auto& positions = skinning_.skinnedPositions();
+        for (size_t mi = 0; mi < meshes_.size() && mi < positions.size(); ++mi) {
+            meshes_[mi]->updatePositions(this, positions[mi], true);
+        }
+        last_evaluated_time_ = current_time_;
+        skinning_dirty_ = false;
     }
 
     QMatrix4x4 modelMat = modelMatrix();

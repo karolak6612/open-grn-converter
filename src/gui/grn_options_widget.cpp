@@ -251,7 +251,7 @@ struct GrnOptionsWidget::Impl {
         if (files.isEmpty()) return;
 
         for (const auto& f : files) {
-            std::filesystem::path p(f.toStdString());
+            std::filesystem::path p(f.toStdWString());
             bool exists = false;
             for (const auto& existing : externalAnims) {
                 if (existing == p) {
@@ -417,7 +417,7 @@ std::vector<std::filesystem::path> GrnOptionsWidget::externalAnimFiles() const {
 
 void GrnOptionsWidget::addExternalAnimFile(const QString& path) {
     if (path.isEmpty()) return;
-    _impl->externalAnims.emplace_back(path.toStdString());
+    _impl->externalAnims.emplace_back(path.toStdWString());
     _impl->rebuildTree();
     emit animFilesChanged();
 }
