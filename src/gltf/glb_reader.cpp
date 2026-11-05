@@ -60,6 +60,18 @@ static std::string get_extras_json(const cgltf_data* data, const cgltf_extras& e
     return {};
 }
 
+constexpr float kInvSqrt2 = 0.7071067811865476f;
+const Vec4 q_inv_yup_conv{kInvSqrt2, 0.0f, 0.0f, kInvSqrt2};
+
+static inline Vec4 quat_mul(const Vec4& a, const Vec4& b) {
+    return {
+        a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
+        a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
+        a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w,
+        a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z
+    };
+}
+
 std::optional<GrnModel> load_glb_memory(const uint8_t* data, size_t size, const GlbImportOptions& options) {
     if (!data || size < 20) return std::nullopt;
 
@@ -178,6 +190,29 @@ std::optional<GrnModel> load_glb_memory(const uint8_t* data, size_t size, const 
             }
         }
 
+        // Validate cached raw_blob against decoded image dimensions if present in extras
+        if (!tex.raw_blob.empty()) {
+            bool valid_blob = false;
+            if (tex.format_code == 4 || tex.format_code == 5) {
+                auto vhdr = parse_vtex_header(reinterpret_cast<const uint8_t*>(tex.raw_blob.data()), tex.raw_blob.size());
+                if (vhdr && vhdr->width == tex.width && vhdr->height == tex.height) {
+                    valid_blob = true;
+                }
+            } else if (tex.format_code == 8) {
+                size_t expected_blocks = ((tex.width + 3) / 4) * ((tex.height + 3) / 4);
+                if (tex.raw_blob.size() == expected_blocks * 8) {
+                    valid_blob = true;
+                }
+            } else if (tex.format_code == 0 || tex.format_code == 1) {
+                if (tex.raw_blob.size() == static_cast<size_t>(tex.width) * tex.height * 4) {
+                    valid_blob = true;
+                }
+            }
+            if (!valid_blob) {
+                tex.raw_blob.clear();
+            }
+        }
+
         if (tex.raw_blob.empty() && !tex.decoded_rgba.empty()) {
             tex.format_code = tex.has_alpha ? 1 : 0;
         }
@@ -267,6 +302,7 @@ std::optional<GrnModel> load_glb_memory(const uint8_t* data, size_t size, const 
         for (size_t j = 0; j < skin.joints_count; ++j) {
             const auto* jnode = skin.joints[j];
             GrnBone bone;
+            bone.index = static_cast<int32_t>(j);
             bone.name = jnode->name ? jnode->name : ("Bone_" + std::to_string(j));
 
             if (jnode->parent && node_to_joint.count(jnode->parent)) {
@@ -275,37 +311,41 @@ std::optional<GrnModel> load_glb_memory(const uint8_t* data, size_t size, const 
                 bone.parent_index = -1;
             }
 
+            bool is_root = (bone.parent_index < 0);
+
             if (jnode->has_translation) {
                 float tx = jnode->translation[0] * options.scale;
                 float ty = jnode->translation[1] * options.scale;
                 float tz = jnode->translation[2] * options.scale;
-                bone.position.x = tx;
-                bone.position.y = options.y_up ? -tz : ty;
-                bone.position.z = options.y_up ? ty : tz;
+                if (options.y_up && is_root) {
+                    bone.position.x = tx;
+                    bone.position.y = -tz;
+                    bone.position.z = ty;
+                } else {
+                    bone.position.x = tx;
+                    bone.position.y = ty;
+                    bone.position.z = tz;
+                }
             }
             if (jnode->has_rotation) {
-                if (options.y_up) {
-                    bone.rotation.x = jnode->rotation[0];
-                    bone.rotation.y = -jnode->rotation[2];
-                    bone.rotation.z = jnode->rotation[1];
-                    bone.rotation.w = jnode->rotation[3];
-                } else {
-                    bone.rotation.x = jnode->rotation[0];
-                    bone.rotation.y = jnode->rotation[1];
-                    bone.rotation.z = jnode->rotation[2];
-                    bone.rotation.w = jnode->rotation[3];
+                Vec4 r{jnode->rotation[0], jnode->rotation[1], jnode->rotation[2], jnode->rotation[3]};
+                if (options.y_up && is_root) {
+                    r = quat_mul(q_inv_yup_conv, r);
                 }
+                float qlen = std::sqrt(r.x * r.x + r.y * r.y + r.z * r.z + r.w * r.w);
+                if (qlen > 1e-6f) {
+                    r.x /= qlen; r.y /= qlen; r.z /= qlen; r.w /= qlen;
+                } else {
+                    r = {0.0f, 0.0f, 0.0f, 1.0f};
+                }
+                bone.rotation = r;
             }
             if (jnode->has_scale) {
                 float sx = jnode->scale[0];
                 float sy = jnode->scale[1];
                 float sz = jnode->scale[2];
-                bool is_root = (bone.parent_index < 0);
                 if (options.y_up && is_root) {
-                    float n_sy = sz;
-                    float n_sz = sy;
-                    sy = n_sy;
-                    sz = n_sz;
+                    std::swap(sy, sz);
                 }
                 bone.scale_3x3[0] = sx;
                 bone.scale_3x3[4] = sy;
@@ -492,8 +532,9 @@ std::optional<GrnModel> load_glb_memory(const uint8_t* data, size_t size, const 
                         if (w > 1e-4f) {
                             int32_t jid = static_cast<int32_t>(j_ids[k]);
                             int32_t skel_b = jid;
-                            if (inst.node && inst.node->skin && jid >= 0 && static_cast<size_t>(jid) < inst.node->skin->joints_count) {
-                                const auto* jn = inst.node->skin->joints[jid];
+                            const cgltf_skin* target_skin = (inst.node && inst.node->skin) ? inst.node->skin : (gltf->skins_count > 0 ? &gltf->skins[0] : nullptr);
+                            if (target_skin && jid >= 0 && static_cast<size_t>(jid) < target_skin->joints_count) {
+                                const auto* jn = target_skin->joints[jid];
                                 if (node_to_joint.count(jn)) {
                                     skel_b = node_to_joint[jn];
                                 }
@@ -575,26 +616,47 @@ std::optional<GrnModel> load_glb_memory(const uint8_t* data, size_t size, const 
 
         // Reconstruct bone palette and remap weights to local indices
         if (!mesh.weights.empty()) {
-            std::string mesh_extras = get_extras_json(gltf, mesh_src->extras);
-            if (!mesh_extras.empty()) {
-                try {
-                    json extras = json::parse(mesh_extras);
-                    if (extras.contains("grn_bone_index_map")) {
-                        mesh.bone_index_map = extras["grn_bone_index_map"].get<std::vector<int32_t>>();
-                    }
-                } catch (...) {}
-            }
-
-            if (mesh.bone_index_map.empty()) {
-                std::vector<int32_t> used_b;
-                for (const auto& vw : mesh.weights) {
-                    for (int32_t b : vw.bone_indices) {
+            std::vector<int32_t> used_b;
+            for (const auto& vw : mesh.weights) {
+                for (size_t wi = 0; wi < vw.bone_indices.size(); ++wi) {
+                    if (wi < vw.bone_weights.size() && vw.bone_weights[wi] > 1e-4f) {
+                        int32_t b = vw.bone_indices[wi];
                         if (std::find(used_b.begin(), used_b.end(), b) == used_b.end()) {
                             used_b.push_back(b);
                         }
                     }
                 }
-                std::sort(used_b.begin(), used_b.end());
+            }
+            std::sort(used_b.begin(), used_b.end());
+
+            std::vector<int32_t> candidate_map;
+            std::string mesh_extras = get_extras_json(gltf, mesh_src->extras);
+            if (!mesh_extras.empty()) {
+                try {
+                    json extras = json::parse(mesh_extras);
+                    if (extras.contains("grn_bone_index_map")) {
+                        candidate_map = extras["grn_bone_index_map"].get<std::vector<int32_t>>();
+                    }
+                } catch (...) {}
+            }
+
+            // Only trust candidate_map if it actually covers ALL used joints in this mesh!
+            // If any joints (e.g. newly rigged bones) are missing from candidate_map,
+            // candidate_map is stale or incomplete and used_b must be used instead.
+            bool covers_all = !candidate_map.empty();
+            if (covers_all) {
+                std::unordered_set<int32_t> cand_set(candidate_map.begin(), candidate_map.end());
+                for (int32_t b : used_b) {
+                    if (cand_set.find(b) == cand_set.end()) {
+                        covers_all = false;
+                        break;
+                    }
+                }
+            }
+
+            if (covers_all) {
+                mesh.bone_index_map = std::move(candidate_map);
+            } else {
                 mesh.bone_index_map = std::move(used_b);
             }
 
@@ -625,12 +687,208 @@ std::optional<GrnModel> load_glb_memory(const uint8_t* data, size_t size, const 
         anim.name = anim_src.name ? anim_src.name : ("Animation_" + std::to_string(model.animations.size()));
 
         float max_dur = 0.0f;
-        for (size_t si = 0; si < anim_src.samplers_count; ++si) {
-            const auto& sampler = anim_src.samplers[si];
-            if (sampler.input && sampler.input->has_max) {
-                max_dur = std::max(max_dur, sampler.input->max[0]);
+
+        // Group channels by target node
+        std::map<const cgltf_node*, std::vector<const cgltf_animation_channel*>> node_channels;
+        for (size_t ci = 0; ci < anim_src.channels_count; ++ci) {
+            const auto& ch = anim_src.channels[ci];
+            if (ch.target_node && ch.sampler && ch.sampler->input && ch.sampler->output) {
+                node_channels[ch.target_node].push_back(&ch);
             }
         }
+
+        for (const auto& [tnode, ch_list] : node_channels) {
+            int32_t joint_idx = -1;
+            auto it = node_to_joint.find(tnode);
+            if (it != node_to_joint.end()) {
+                joint_idx = it->second;
+            } else if (tnode->name) {
+                for (size_t bi = 0; bi < model.bones.size(); ++bi) {
+                    if (model.bones[bi].name == tnode->name) {
+                        joint_idx = static_cast<int32_t>(bi);
+                        break;
+                    }
+                }
+            }
+
+            if (joint_idx < 0) {
+                if (gltf->skins_count > 0) {
+                    // If a model has a skeleton, non-joint nodes (e.g. mesh nodes, cameras, lights)
+                    // are NOT part of the skeleton and must be discarded.
+                    continue;
+                }
+                GrnBone b;
+                joint_idx = static_cast<int32_t>(model.bones.size());
+                b.index = joint_idx;
+                b.name = tnode->name ? tnode->name : ("Node_" + std::to_string(model.bones.size()));
+                b.parent_index = -1;
+                node_to_joint[tnode] = joint_idx;
+                model.bones.push_back(std::move(b));
+            }
+
+            AnimTrack track;
+            track.channel_id = joint_idx + 1;
+            track.bone_name = model.bones[joint_idx].name;
+            track.format = "split";
+            track.position_interp_mode = 1;
+            track.quaternion_interp_mode = 1;
+            track.scale_shear_interp_mode = 1;
+            bool is_root = (model.bones[joint_idx].parent_index < 0);
+
+            for (const auto* ch : ch_list) {
+                const auto* samp = ch->sampler;
+                if (!samp->input || !samp->output) continue;
+
+                size_t key_count = samp->input->count;
+                if (key_count == 0) continue;
+
+                std::vector<float> times(key_count);
+                cgltf_accessor_unpack_floats(samp->input, times.data(), key_count);
+                for (float t : times) {
+                    max_dur = std::max(max_dur, t);
+                }
+
+                uint32_t interp_mode = 1;
+                if (samp->interpolation == cgltf_interpolation_type_cubic_spline) {
+                    interp_mode = 3;
+                } else if (samp->interpolation == cgltf_interpolation_type_step) {
+                    interp_mode = 0;
+                } else {
+                    interp_mode = 1;
+                }
+                bool is_cubic = (interp_mode == 3);
+
+                if (ch->target_path == cgltf_animation_path_type_translation) {
+                    track.position_interp_mode = interp_mode;
+                    track.translation_times = times;
+                    size_t stride = is_cubic ? 9 : 3;
+                    size_t off = is_cubic ? 3 : 0;
+                    std::vector<float> raw(key_count * stride);
+                    cgltf_accessor_unpack_floats(samp->output, raw.data(), raw.size());
+
+                    for (size_t k = 0; k < key_count; ++k) {
+                        float px = raw[k * stride + off + 0];
+                        float py = raw[k * stride + off + 1];
+                        float pz = raw[k * stride + off + 2];
+
+                        float tx, ty, tz;
+                        if (options.y_up && is_root) {
+                            tx = px * options.scale;
+                            ty = -pz * options.scale;
+                            tz = py * options.scale;
+                        } else {
+                            tx = px * options.scale;
+                            ty = py * options.scale;
+                            tz = pz * options.scale;
+                        }
+                        track.translations.push_back({tx, ty, tz});
+                    }
+                } else if (ch->target_path == cgltf_animation_path_type_rotation) {
+                    track.quaternion_interp_mode = interp_mode;
+                    track.rotation_times = times;
+                    size_t stride = is_cubic ? 12 : 4;
+                    size_t off = is_cubic ? 4 : 0;
+                    std::vector<float> raw(key_count * stride);
+                    cgltf_accessor_unpack_floats(samp->output, raw.data(), raw.size());
+
+                    for (size_t k = 0; k < key_count; ++k) {
+                        float qx = raw[k * stride + off + 0];
+                        float qy = raw[k * stride + off + 1];
+                        float qz = raw[k * stride + off + 2];
+                        float qw = raw[k * stride + off + 3];
+
+                        Vec4 r{qx, qy, qz, qw};
+                        if (options.y_up && is_root) {
+                            r = quat_mul(q_inv_yup_conv, r);
+                        }
+                        float qlen = std::sqrt(r.x * r.x + r.y * r.y + r.z * r.z + r.w * r.w);
+                        if (qlen > 1e-6f) {
+                            r.x /= qlen; r.y /= qlen; r.z /= qlen; r.w /= qlen;
+                        } else {
+                            r = {0.0f, 0.0f, 0.0f, 1.0f};
+                        }
+                        track.rotations.push_back(r);
+                    }
+                } else if (ch->target_path == cgltf_animation_path_type_scale) {
+                    track.scale_shear_interp_mode = interp_mode;
+                    track.scale_shear_times = times;
+                    size_t stride = is_cubic ? 9 : 3;
+                    size_t off = is_cubic ? 3 : 0;
+                    std::vector<float> raw(key_count * stride);
+                    cgltf_accessor_unpack_floats(samp->output, raw.data(), raw.size());
+
+                    for (size_t k = 0; k < key_count; ++k) {
+                        float sx = raw[k * stride + off + 0];
+                        float sy = raw[k * stride + off + 1];
+                        float sz = raw[k * stride + off + 2];
+                        if (options.y_up && is_root) {
+                            std::swap(sy, sz);
+                        }
+                        std::array<float, 9> m{};
+                        m[0] = sx; m[4] = sy; m[8] = sz;
+                        track.scale_shears.push_back(m);
+                    }
+                }
+            }
+
+            if (!track.translations.empty() || !track.rotations.empty() || !track.scale_shears.empty()) {
+                anim.tracks.push_back(std::move(track));
+            }
+        }
+
+        // Ensure every bone in model.bones has a track in anim.tracks (1:1 with T_FORM_BONE_CHANNELS)
+        std::unordered_map<int32_t, size_t> existing_tracks;
+        for (size_t ti = 0; ti < anim.tracks.size(); ++ti) {
+            existing_tracks[anim.tracks[ti].channel_id] = ti;
+        }
+
+        float clip_dur = (max_dur > 0.0f) ? max_dur : (1.0f / 30.0f);
+
+        for (size_t bi = 0; bi < model.bones.size(); ++bi) {
+            int32_t ch_id = static_cast<int32_t>(bi + 1);
+            auto it = existing_tracks.find(ch_id);
+            if (it != existing_tracks.end()) {
+                auto& trk = anim.tracks[it->second];
+
+                if (trk.translations.empty()) {
+                    trk.translation_times = {0.0f, clip_dur};
+                    trk.translations = {model.bones[bi].position, model.bones[bi].position};
+                    trk.position_interp_mode = 1;
+                }
+                if (trk.rotations.empty()) {
+                    trk.rotation_times = {0.0f, clip_dur};
+                    trk.rotations = {model.bones[bi].rotation, model.bones[bi].rotation};
+                    trk.quaternion_interp_mode = 1;
+                }
+                if (trk.scale_shears.empty()) {
+                    trk.scale_shear_times = {0.0f, clip_dur};
+                    trk.scale_shears = {model.bones[bi].scale_3x3, model.bones[bi].scale_3x3};
+                    trk.scale_shear_interp_mode = 1;
+                }
+            } else {
+                // Add static track for un-animated bone
+                AnimTrack trk;
+                trk.channel_id = ch_id;
+                trk.bone_name = model.bones[bi].name;
+                trk.format = "split";
+                trk.position_interp_mode = 1;
+                trk.quaternion_interp_mode = 1;
+                trk.scale_shear_interp_mode = 1;
+                trk.translation_times = {0.0f, clip_dur};
+                trk.translations = {model.bones[bi].position, model.bones[bi].position};
+                trk.rotation_times = {0.0f, clip_dur};
+                trk.rotations = {model.bones[bi].rotation, model.bones[bi].rotation};
+                trk.scale_shear_times = {0.0f, clip_dur};
+                trk.scale_shears = {model.bones[bi].scale_3x3, model.bones[bi].scale_3x3};
+                anim.tracks.push_back(std::move(trk));
+            }
+        }
+
+        // Sort tracks by channel_id (1, 2, ..., N)
+        std::sort(anim.tracks.begin(), anim.tracks.end(), [](const AnimTrack& a, const AnimTrack& b) {
+            return a.channel_id < b.channel_id;
+        });
+
         anim.duration = max_dur;
         model.animations.push_back(std::move(anim));
     }
@@ -649,14 +907,15 @@ std::optional<GrnModel> load_glb_memory(const uint8_t* data, size_t size, const 
     }
 
     if (options.target_height > 0.0f) {
-        float min_z = 1e30f, max_z = -1e30f;
+        float min_h = 1e30f, max_h = -1e30f;
         for (const auto& m : model.meshes) {
             for (const auto& v : m.vertices) {
-                min_z = std::min(min_z, v.z);
-                max_z = std::max(max_z, v.z);
+                float h_val = options.y_up ? v.z : v.y;
+                min_h = std::min(min_h, h_val);
+                max_h = std::max(max_h, h_val);
             }
         }
-        float cur_h = max_z - min_z;
+        float cur_h = max_h - min_h;
         if (cur_h > 1e-4f) {
             float auto_s = options.target_height / cur_h;
             for (auto& m : model.meshes) {
@@ -671,7 +930,20 @@ std::optional<GrnModel> load_glb_memory(const uint8_t* data, size_t size, const 
                 b.position.y *= auto_s;
                 b.position.z *= auto_s;
             }
+            for (auto& a : model.animations) {
+                for (auto& tr : a.tracks) {
+                    for (auto& t : tr.translations) {
+                        t.x *= auto_s;
+                        t.y *= auto_s;
+                        t.z *= auto_s;
+                    }
+                }
+            }
         }
+    }
+
+    for (size_t bi = 0; bi < model.bones.size(); ++bi) {
+        model.bones[bi].index = static_cast<int32_t>(bi);
     }
 
     cgltf_free(gltf);

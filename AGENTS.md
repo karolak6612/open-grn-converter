@@ -18,7 +18,7 @@
   - `GRN -> GLB`: Extracts meshes, skeletons, skinning weights (`JOINTS_0`, `WEIGHTS_0`), inverse bind matrices (IBM), materials, embedded textures (DXT1, Raw RGB/RGBA, VTex), and animations into self-contained glTF 2.0 models.
   - `GLB -> GRN`: Ingests glTF models, decomposes bone hierarchies and mesh primitives, transforms coordinates (glTF Y-up to Granny Z-up), generates bit-accurate Granny 1.2b relational chunk hierarchies, string tables, Section 0 descriptors, and relocation footers for in-game execution.
 - **Dual Interface Modes**:
-  - **Modern GUI**: Dear ImGui interface with custom Flat Magic Rune theme, integrated rune icon, drag-and-drop, real-time logging, and batch conversion.
+  - **Modern GUI**: Qt6 + Qlementine interface with 3D Dual-Viewport (OpenGL), animation playback, interactive bone inspector, model stats cards, real-time logging, and batch conversion.
   - **High-Speed CLI**: Headless command-line utility for CI/CD pipelines, automated modding scripts, and batch processing.
 
 ---
@@ -29,14 +29,15 @@ Before making any modifications or investigating issues, ground yourself in **ve
 
 1. **Verify the environment**:
    - CMake 3.22+ and MSVC C++20 toolchain (or GCC 12+ / Clang 14+).
-   - vcpkg packages installed: `glfw3`, `imgui` (with glfw/opengl3 bindings), `nlohmann-json`, `stb`, `glad`.
+   - Qt 6.5+ (Widgets, OpenGLWidgets, Svg, Concurrent).
+   - vcpkg packages installed: `nlohmann-json`, `stb`, `meshoptimizer`.
 2. **Run the baseline test suite**:
    ```bash
    cmake --preset release
    cmake --build --preset release
    ctest --preset release --output-on-failure
    ```
-   Confirm all 6 test targets pass (`test_codecs`, `test_parser`, `test_writer`, `test_roundtrip`, `test_texture_hue`, `test_viewer_compat`).
+   Confirm all 10 test targets pass (`test_codecs`, `test_parser`, `test_writer`, `test_roundtrip`, `test_texture_hue`, `test_viewer_compat`, `test_optimizer`, `test_stress_detect`, `test_challenger_adversarial`, `test_viewer_engine`).
 3. **Evidence over assumptions**:
    - **Nothing written in documentation is evidence until re-verified.** Always re-run the specific CLI command, CTest, or validator probe to substantiate any claim.
    - Classify all conclusions strictly:
@@ -80,7 +81,7 @@ These rules are non-negotiable across all sessions and agent workflows:
 open-grn-converter/
 ├── CMakeLists.txt             # Primary C++20 CMake build configuration
 ├── CMakePresets.json          # Multi-config build presets (release, debug)
-├── vcpkg.json                 # Dependency manifest (glfw3, imgui, nlohmann-json, stb, glad)
+├── vcpkg.json                 # Dependency manifest (nlohmann-json, stb, meshoptimizer)
 ├── LICENSE                    # MIT License
 ├── README.md                  # Human user documentation & usage guide
 ├── AGENTS.md                  # Machine contract & agent guide (this file)
@@ -98,7 +99,10 @@ open-grn-converter/
 │   ├── converter/             # Bidirectional Orchestration Pipeline
 │   │   ├── options.h          # ConversionOptions structure (scale, z-up, textures, anim)
 │   │   ├── converter.h        # High-level convert_grn_to_glb / convert_glb_to_grn API
-│   │   └── converter.cpp      # Coordinate transforms, IBM calculations, anim merging
+│   │   ├── converter.cpp      # Coordinate transforms, IBM calculations, anim merging
+│   │   ├── anim_optimizer.h/.cpp # Keyframe resampling, micro-bone culling, loop-safe clamping
+│   │   ├── mesh_optimizer.h/.cpp # 16-bit safe mesh partitioner and QEM decimation
+│   │   └── grn_anim_sampler.h/.cpp # Cubic spline / linear animation keyframe sampler
 │   ├── core/                  # Granny 1.2b Binary Container Engine
 │   │   ├── grn_types.h        # 0xCA5E chunk constants, section headers, GrnModel structures
 │   │   ├── grn_parser.h/.cpp  # Recursive binary chunk parser, skeleton/mesh/anim decoding
@@ -106,11 +110,20 @@ open-grn-converter/
 │   ├── gltf/                  # glTF 2.0 / GLB Importer and Exporter
 │   │   ├── glb_reader.h/.cpp  # cgltf-based GLB reader, node hierarchy, skin & weight parsing
 │   │   └── glb_writer.h/.cpp  # glTF 2.0 JSON + BIN chunk generator, bufferView packing
-│   └── gui/                   # Dear ImGui Desktop Application
-│       ├── app.h/.cpp         # GLFW/OpenGL 3.3 window, lifecycle, Flat Magic Rune theme
-│       ├── ui_panels.h/.cpp   # Panels: Single File, Batch, Settings, Real-time Log Console
-│       ├── file_dialog.h/.cpp # Win32 native file and folder pickers (IFileDialog / GetOpenFileName)
-│       └── embedded_icon.h    # Embedded 32x32 / 64x64 magic rune icon pixel buffer
+│   └── gui/                   # Qt6 + Qlementine GUI Desktop Application
+│       ├── main_window.h/.cpp # Main application shell, toolbar, layout
+│       ├── bone_inspector_widget.h/.cpp # Skeletal tree and transform inspector
+│       ├── glb_options_widget.h/.cpp    # glTF / GLB export parameters & animation optimization
+│       ├── grn_options_widget.h/.cpp    # Granny 1.2b export options & anim merge list
+│       ├── source_info_widget.h/.cpp    # Input model stats and card visualizers
+│       ├── target_info_widget.h/.cpp    # Converted model output cards & folder navigation
+│       ├── log_drawer.h/.cpp  # Collapsible real-time color-coded logging console
+│       └── viewer/            # Embedded 3D Dual-Viewport OpenGL Engine
+│           ├── model_viewer_panel.h/.cpp # Viewport toolbar, single/split mode, camera controls
+│           ├── viewport_widget.h/.cpp    # OpenGL widget, shaders, grid, skeleton rendering
+│           ├── playback_bar.h/.cpp       # Animation timeline scrubber, play/pause, speed
+│           ├── skinning_engine.h/.cpp    # CPU skinning and vertex transformation pipeline
+│           └── camera.h/.cpp             # Arcball orbit camera with pan and zoom
 │
 ├── resources/                 # Application Resources
 │   ├── grn_converter.rc       # Windows resource script (icon embedding)
@@ -129,7 +142,11 @@ open-grn-converter/
     ├── test_writer.cpp        # GRN container serializer & relocation tests
     ├── test_roundtrip.cpp     # Bidirectional GRN <-> GLB roundtrip tests
     ├── test_texture_hue.cpp   # Texture color channel transformations & filtering
-    └── test_viewer_compat.cpp # Live debugger tests verifying 0 crashes in Granny viewer
+    ├── test_viewer_compat.cpp # Live debugger tests verifying 0 crashes in Granny viewer
+    ├── test_optimizer.cpp     # 16-bit mesh partitioner & multi-material split tests
+    ├── test_stress_detect.cpp # Coordinate system & bounding-box stress tests
+    ├── test_challenger_adversarial.cpp # Adversarial orientation challenger tests
+    └── test_viewer_engine.cpp # 3D viewport, skinning, and animation engine tests
 ```
 
 ---
@@ -214,6 +231,24 @@ Granny 1.2b files are relational binary containers structured as hierarchical ch
   $$q_{gltf} = (x_{grn}, z_{grn}, -y_{grn}, w_{grn})$$
 - When `--z-up` is specified, coordinate swizzling is bypassed, preserving native Granny coordinates directly in the glTF output.
 
+### 5.5 Animation Container Architecture & Reverse Engineering Findings
+
+1. **Granny 1.2b Animation Structure**:
+   - Every animation container (`T_ANIMATION_SECTION` `0xca5e1205`) contains track leaves (`T_ANIMATION_TRANSFORM_TRACK_KEYS` `0xca5e1204`).
+   - Each track references a 1-indexed bone channel ID (`channel_id = bone_index + 1`).
+   - Skeletons require pre-registration of transform channels: whenever `!model.bones.empty()`, Section 1 must emit `T_HEADER_SPACER` (`0xca5e0a01`) followed by `T_TRANSFORM_CHANNEL_SECTION` (`0xca5e0b01`) containing `T_TRANSFORM_CHANNEL` (`0xca5e0b00`) nodes. Without this, engines fail to allocate channel map tables.
+   - Pure animation files (no mesh) must emit an empty `T_MESH_SECTION` (`0xca5e0602`) leaf to satisfy downstream Granny chunk iterators.
+2. **Split Animation Pipeline (`--split-anims`)**:
+   - Granny 1.2b engines (e.g. *Sacred Gold*) keep character meshes in base `.grn` files (`Hero.grn`) and animation clips in standalone files (`Hero_Run.grn`, `Hero_Attack.grn`).
+   - When converting `GLB -> GRN`, `open-grn-converter` defaults to `--split-anims`:
+     - Base file: Mesh + Materials + Textures + Skeleton (`0` animations).
+     - Clip files: Matching Skeleton + Animation Track (`0` meshes).
+   - CLI allows recombining external animations back onto rigged models via `--anim <path>` (can repeat).
+3. **Viewer Discrepancy: `playgrn.exe` vs `gr2_viewer.exe`**:
+   - `playgrn.exe` (Authentic Granny 1.2b player): Reads `.grn` relational chunks directly, loading raw keyframes into linear memory pools. Performs 0 curve-fitting conversion. Can play 1,900+ animated bone tracks natively with 0 crashes.
+   - `gr2_viewer.exe` (Granny 2 viewer): Has no native Granny 1.2b renderer; converts `.grn` to `.gr2` on the fly via `GRN2GR2ConvertGRNFile` (`0x00438750`). Uses a debug page-heap allocator (`VirtualAlloc` + guard page) with a 2 GB 32-bit address space limit. Modern massive rigs (>1,000 active 61-frame spline tracks) exhaust virtual address space during cubic curve optimization, causing `0xC0000005` at `0x004acf4e`.
+   - The `.grn` files produced by `open-grn-converter` are 100% valid Granny 1.2b containers.
+
 ---
 
 ## 6. Build, Test, and Tooling Reference
@@ -254,7 +289,7 @@ ctest --preset release --output-on-failure
 # Export loose textures instead of embedding in GLB
 .\build\Release\grn_converter.exe model.grn model.glb --no-embed-textures --texture-format png
 
-# Launch Dear ImGui GUI window explicitly
+# Launch Qt6 / Qlementine GUI window explicitly
 .\build\Release\grn_converter.exe --gui
 ```
 

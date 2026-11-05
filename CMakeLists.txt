@@ -2,13 +2,19 @@ cmake_minimum_required(VERSION 3.22)
 
 project(grn_converter
     VERSION 1.0.0
-    DESCRIPTION "GRN to glTF 2.0 / GLB bidirectional converter with Dear ImGui GUI and CLI"
+    DESCRIPTION "GRN to glTF 2.0 / GLB bidirectional converter with Qt6 Qlementine GUI and CLI"
     LANGUAGES C CXX
 )
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
+# Enable Qt MOC, RCC, UIC
+set(CMAKE_AUTOMOC ON)
+set(CMAKE_AUTORCC ON)
+set(CMAKE_AUTOUIC ON)
 
 # Compiler-specific options
 if(MSVC)
@@ -20,13 +26,40 @@ endif()
 
 add_compile_definitions(GRN_SOURCE_CODE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 
-# Find external dependencies via VCPKG
-find_package(glfw3 CONFIG REQUIRED)
-find_package(imgui CONFIG REQUIRED)
+# Fallback Qt6 prefix path
+if(WIN32)
+    if(DEFINED ENV{CMAKE_PREFIX_PATH})
+        list(APPEND CMAKE_PREFIX_PATH "$ENV{CMAKE_PREFIX_PATH}")
+    elseif(DEFINED ENV{QT_DIR})
+        list(APPEND CMAKE_PREFIX_PATH "$ENV{QT_DIR}")
+    elseif(NOT DEFINED CMAKE_PREFIX_PATH AND EXISTS "C:/Qt/6.11.2/msvc2022_64")
+        list(APPEND CMAKE_PREFIX_PATH "C:/Qt/6.11.2/msvc2022_64")
+    endif()
+endif()
+
+# Find external dependencies
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Svg Concurrent OpenGL OpenGLWidgets)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(Stb REQUIRED)
-find_package(glad CONFIG REQUIRED)
-find_package(OpenGL REQUIRED)
+find_package(meshoptimizer CONFIG REQUIRED)
+
+# Qlementine & Qlementine-Icons (Modern Fluent/macOS QStyle)
+include(FetchContent)
+set(QLEMENTINE_SANDBOX OFF CACHE BOOL "" FORCE)
+set(QLEMENTINE_SHOWCASE OFF CACHE BOOL "" FORCE)
+set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+
+FetchContent_Declare(
+    qlementine
+    GIT_REPOSITORY "https://github.com/oclero/qlementine.git"
+    GIT_TAG "7825161fce66ac5a49bc0ffe39ab13df5ff8ff4a"
+)
+FetchContent_Declare(
+    qlementine-icons
+    GIT_REPOSITORY "https://github.com/oclero/qlementine-icons.git"
+    GIT_TAG "e7cf96d0c60836b285f117cede9ed8c4113ebfa8"
+)
+FetchContent_MakeAvailable(qlementine qlementine-icons)
 
 # ---------------------------------------------------------------------------
 # Core Conversion and Codec Library
@@ -40,6 +73,9 @@ set(GRN_CORE_SOURCES
     src/gltf/glb_reader.cpp
     src/gltf/glb_writer.cpp
     src/converter/converter.cpp
+    src/converter/mesh_optimizer.cpp
+    src/converter/anim_optimizer.cpp
+    src/converter/grn_anim_sampler.cpp
 )
 
 set(GRN_CORE_HEADERS
@@ -53,6 +89,9 @@ set(GRN_CORE_HEADERS
     src/gltf/glb_writer.h
     src/converter/options.h
     src/converter/converter.h
+    src/converter/mesh_optimizer.h
+    src/converter/anim_optimizer.h
+    src/converter/grn_anim_sampler.h
 )
 
 add_library(grn_core STATIC
@@ -71,28 +110,60 @@ target_include_directories(grn_core
 target_link_libraries(grn_core
     PUBLIC
         nlohmann_json::nlohmann_json
+        meshoptimizer::meshoptimizer
 )
 
 # ---------------------------------------------------------------------------
-# Main Application Executable (CLI + GUI)
+# Main Application Executable (CLI + Qt6 GUI)
 # ---------------------------------------------------------------------------
 set(GRN_APP_SOURCES
     src/main.cpp
     src/cli/cli_main.cpp
-    src/gui/app.cpp
-    src/gui/ui_panels.cpp
-    src/gui/file_dialog.cpp
+    src/gui/main_window.cpp
+    src/gui/conversion_worker.cpp
+    src/gui/grn_options_widget.cpp
+    src/gui/glb_options_widget.cpp
+    src/gui/log_drawer.cpp
+    src/gui/viewer/camera.cpp
+    src/gui/viewer/skinning_engine.cpp
+    src/gui/viewer/shader_gl.cpp
+    src/gui/viewer/font_atlas.cpp
+    src/gui/viewer/mesh_gl.cpp
+    src/gui/viewer/playback_bar.cpp
+    src/gui/viewer/viewport_widget.cpp
+    src/gui/viewer/model_viewer_panel.cpp
+    src/gui/target_info_widget.cpp
+    src/gui/source_info_widget.cpp
+    src/gui/bone_inspector_widget.cpp
 )
 
 set(GRN_APP_HEADERS
     src/cli/cli_main.h
-    src/gui/app.h
-    src/gui/ui_panels.h
-    src/gui/file_dialog.h
+    src/gui/main_window.h
+    src/gui/conversion_worker.h
+    src/gui/grn_options_widget.h
+    src/gui/glb_options_widget.h
+    src/gui/bone_inspector_widget.h
+    src/gui/log_drawer.h
+    src/gui/section_card.h
+    src/gui/gui_utils.h
+    src/gui/source_info_widget.h
+    src/gui/target_info_widget.h
+    src/gui/viewer/camera.h
+    src/gui/viewer/skinning_engine.h
+    src/gui/viewer/shader_gl.h
+    src/gui/viewer/font_atlas.h
+    src/gui/viewer/mesh_gl.h
+    src/gui/viewer/playback_bar.h
+    src/gui/viewer/viewport_widget.h
+    src/gui/viewer/model_viewer_panel.h
 )
 
+set(GRN_APP_RESOURCES
+    resources/themes.qrc
+)
 if(WIN32)
-    set(GRN_APP_RESOURCES resources/grn_converter.rc)
+    list(APPEND GRN_APP_RESOURCES resources/grn_converter.rc)
 endif()
 
 add_executable(grn_converter
@@ -110,10 +181,15 @@ target_include_directories(grn_converter
 target_link_libraries(grn_converter
     PRIVATE
         grn_core
-        glfw
-        imgui::imgui
-        glad::glad
-        OpenGL::GL
+        Qt6::Core
+        Qt6::Gui
+        Qt6::Widgets
+        Qt6::Svg
+        Qt6::Concurrent
+        Qt6::OpenGL
+        Qt6::OpenGLWidgets
+        qlementine
+        qlementine-icons
 )
 
 if(WIN32)
@@ -125,10 +201,26 @@ if(WIN32)
     endif()
     target_link_libraries(grn_converter
         PRIVATE
-            comdlg32
             shell32
             ole32
     )
+
+    # Automatically deploy Qt DLLs and plugins using windeployqt
+    find_program(WINDEPLOYQT_EXECUTABLE windeployqt HINTS
+        "$ENV{QT_DIR}/bin"
+        "${CMAKE_PREFIX_PATH}/bin"
+        "C:/Qt/6.11.2/msvc2022_64/bin"
+    )
+    if(WINDEPLOYQT_EXECUTABLE)
+        add_custom_command(TARGET grn_converter POST_BUILD
+            COMMAND "${WINDEPLOYQT_EXECUTABLE}"
+                --no-compiler-runtime
+                --no-opengl-sw
+                --no-translations
+                "$<TARGET_FILE:grn_converter>"
+            COMMENT "Deploying Qt libraries via windeployqt"
+        )
+    endif()
 endif()
 
 # Deploy test_grn to binary running folder
@@ -174,3 +266,26 @@ add_grn_test(test_writer tests/test_writer.cpp)
 add_grn_test(test_roundtrip tests/test_roundtrip.cpp)
 add_grn_test(test_texture_hue tests/test_texture_hue.cpp)
 add_grn_test(test_viewer_compat tests/test_viewer_compat.cpp)
+add_grn_test(test_optimizer tests/test_optimizer.cpp)
+add_grn_test(test_stress_detect tests/test_stress_detect.cpp)
+add_grn_test(test_challenger_adversarial tests/test_challenger_adversarial.cpp)
+
+
+add_executable(test_viewer_engine
+    tests/test_viewer_engine.cpp
+    src/gui/viewer/camera.cpp
+    src/gui/viewer/skinning_engine.cpp
+)
+target_include_directories(test_viewer_engine
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${Stb_INCLUDE_DIR}
+)
+target_link_libraries(test_viewer_engine
+    PRIVATE
+        grn_core
+        Qt6::Core
+        Qt6::Gui
+)
+add_test(NAME test_viewer_engine COMMAND test_viewer_engine)
+

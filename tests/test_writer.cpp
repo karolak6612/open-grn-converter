@@ -61,6 +61,7 @@ static void test_writer_file_io() {
     fs::path temp_file = fs::temp_directory_path() / "test_writer_out.grn";
     bool written = grn::write_grn_file(temp_file, model);
     assert(written);
+    (void)written;
 
     auto loaded = grn::parse_grn_file(temp_file);
     assert(loaded.has_value());

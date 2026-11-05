@@ -17,6 +17,7 @@
 #include <cassert>
 #include <iomanip>
 #include <cmath>
+#include <cstring>
 
 #ifdef _WIN32
 #ifndef NOMINMAX

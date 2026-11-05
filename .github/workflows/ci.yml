@@ -1,4 +1,4 @@
-﻿name: CI Release Build & Test
+name: CI Release Build & Test
 
 on:
   push:
@@ -16,17 +16,23 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-and-test:
+  build-windows:
     name: Build & Test (Windows Release)
     runs-on: windows-latest
-    permissions:
-      contents: write
-
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
           submodules: recursive
+
+      - name: Install Qt 6
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.9.0'
+          host: 'windows'
+          target: 'desktop'
+          arch: 'win64_msvc2022_64'
+          cache: true
 
       - name: Restore vcpkg installed tree
         uses: actions/cache@v4
@@ -47,8 +53,9 @@ jobs:
         shell: pwsh
         env:
           VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+          QT_DIR: ${{ env.QT_ROOT_DIR }}
         run: |
-          cmake --preset release
+          cmake --preset release -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR"
 
       - name: Build Release Executables & Libraries
         shell: pwsh
@@ -63,48 +70,208 @@ jobs:
       - name: Stage Release Package
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Path dist -Force
-          Copy-Item "build/Release/grn_converter.exe" -Destination dist/
-          if (Test-Path "build/Release/glfw3.dll") {
-              Copy-Item "build/Release/glfw3.dll" -Destination dist/
-          }
-          Copy-Item "README.md" -Destination dist/
-          Copy-Item "LICENSE" -Destination dist/
+          $dist = "dist"
+          if (Test-Path $dist) { Remove-Item -Recurse -Force $dist }
+          New-Item -ItemType Directory -Path $dist -Force | Out-Null
           
-          # Create zip bundle for end users (AGENTS.md excluded)
-          Compress-Archive -Path "dist/*" -DestinationPath "open-grn-converter-windows-x64.zip" -Force
-          Move-Item -Path "open-grn-converter-windows-x64.zip" -Destination "dist/" -Force
-          Get-ChildItem dist
+          # 1. Copy main executable
+          Copy-Item "build/Release/grn_converter.exe" -Destination "$dist/" -Force
+          
+          # 2. Copy third-party runtime dependencies
+          $runtimeDlls = @("meshoptimizer.dll", "D3Dcompiler_47.dll", "dxcompiler.dll", "dxil.dll")
+          foreach ($dll in $runtimeDlls) {
+              if (Test-Path "build/Release/$dll") {
+                  Copy-Item "build/Release/$dll" -Destination "$dist/" -Force
+              }
+          }
+          
+          # 3. Locate windeployqt.exe and deploy Qt6 libraries
+          $windeployqt = if (Test-Path "$env:QT_ROOT_DIR/bin/windeployqt.exe") {
+              "$env:QT_ROOT_DIR/bin/windeployqt.exe"
+          } elseif (Get-Command windeployqt -ErrorAction SilentlyContinue) {
+              (Get-Command windeployqt).Source
+          } else {
+              $null
+          }
+          
+          if ($windeployqt) {
+              Write-Host "Running windeployqt: $windeployqt"
+              & $windeployqt --no-translations "$dist/grn_converter.exe"
+          }
+          
+          # 4. Copy VC++ runtime DLLs (MSVC CRT) if available
+          $vcRedist = Get-ChildItem -Path "$env:ProgramFiles/Microsoft Visual Studio" -Filter "msvcp140.dll" -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.FullName -match 'x64' -and $_.FullName -notmatch 'onecore' } | Select-Object -First 1
+          if ($vcRedist) {
+              $redistDir = $vcRedist.DirectoryName
+              Get-ChildItem -Path $redistDir -Filter "*.dll" | ForEach-Object {
+                  if (-not (Test-Path "$dist/$($_.Name)")) {
+                      Copy-Item $_.FullName -Destination "$dist/" -Force
+                  }
+              }
+          }
+
+          # 5. Copy Qlementine style plugin if present
+          $qlementinePlugin = Get-ChildItem -Path "build" -Filter "qlementinestyleplugin.dll" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($qlementinePlugin) {
+              if (-not (Test-Path "$dist/styles")) { New-Item -ItemType Directory -Path "$dist/styles" -Force | Out-Null }
+              Copy-Item $qlementinePlugin.FullName -Destination "$dist/styles/" -Force
+          }
+          
+          # 6. Copy Qt6 DLLs and plugin directories
+          Get-ChildItem "build/Release" -Filter "Qt6*.dll" -File -ErrorAction SilentlyContinue | ForEach-Object {
+              if (-not (Test-Path "$dist/$($_.Name)")) {
+                  Copy-Item $_.FullName -Destination "$dist/" -Force
+              }
+          }
+          
+          $pluginFolders = @("platforms", "styles", "imageformats", "iconengines", "tls", "generic", "networkinformation")
+          foreach ($folder in $pluginFolders) {
+              if ((Test-Path "build/Release/$folder") -and (-not (Test-Path "$dist/$folder"))) {
+                  Copy-Item "build/Release/$folder" -Destination "$dist/" -Recurse -Force
+              }
+          }
+          
+          # 7. Clean intermediate/debug files
+          Get-ChildItem -Path $dist -Filter "test_*.exe" -Recurse | Remove-Item -Force
+          Get-ChildItem -Path $dist -Filter "*.pdb" -Recurse | Remove-Item -Force
+          Get-ChildItem -Path $dist -Filter "*.ilk" -Recurse | Remove-Item -Force
+          Get-ChildItem -Path $dist -Filter "*.exp" -Recurse | Remove-Item -Force
+          Get-ChildItem -Path $dist -Filter "*.lib" -Recurse | Remove-Item -Force
+          if (Test-Path "$dist/test_grn") {
+              Remove-Item -Recurse -Force "$dist/test_grn"
+          }
+          
+          # 8. Copy documentation and license
+          Copy-Item "README.md" -Destination "$dist/" -Force
+          Copy-Item "LICENSE" -Destination "$dist/" -Force
 
       - name: Upload Workflow Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: open-grn-converter-windows-x64-${{ github.sha }}
+          name: open-grn-converter-windows-x64
           path: dist/
           if-no-files-found: error
 
-      - name: Publish Automated GitHub Release
-        if: (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) && github.repository_owner == 'karolak6612'
-        shell: pwsh
+  build-linux:
+    name: Build & Test (Linux Release)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install System Dependencies & Qt 6
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            ninja-build \
+            qt6-base-dev \
+            qt6-base-dev-tools \
+            libqt6svg6-dev \
+            libgl1-mesa-dev \
+            libglu1-mesa-dev \
+            libxkbcommon-dev
+
+      - name: Restore vcpkg installed tree
+        uses: actions/cache@v4
+        with:
+          path: build/vcpkg_installed
+          key: vcpkg-installed-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}
+          restore-keys: |
+            vcpkg-installed-${{ runner.os }}-
+
+      - name: Export GitHub Actions Cache Credentials for vcpkg
+        uses: actions/github-script@v7
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+      - name: Configure CMake (Linux Release)
+        env:
+          VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+        run: |
+          cmake --preset linux-release
+
+      - name: Build Release Executables & Libraries
+        run: |
+          cmake --build --preset linux-release --parallel
+
+      - name: Run Automated CTest Suite
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          ctest --preset linux-release --output-on-failure
+
+      - name: Stage Release Package
+        run: |
+          mkdir -p dist
+          cp build/grn_converter dist/
+          cp README.md dist/
+          cp LICENSE dist/
+
+      - name: Upload Workflow Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: open-grn-converter-linux-x64
+          path: dist/
+          if-no-files-found: error
+
+  publish-release:
+    name: Publish Automated GitHub Release
+    needs: [build-windows, build-linux]
+    if: (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) && github.repository_owner == 'karolak6612'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download Windows Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: open-grn-converter-windows-x64
+          path: release_assets/windows_dist/
+
+      - name: Download Linux Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: open-grn-converter-linux-x64
+          path: release_assets/linux_dist/
+
+      - name: Package Release Archives
+        run: |
+          sudo apt-get update && sudo apt-get install -y zip
+          cd release_assets/windows_dist && zip -r ../open-grn-converter-windows-x64.zip . && cd ../..
+          cd release_assets/linux_dist && chmod +x grn_converter && tar -czvf ../open-grn-converter-linux-x64.tar.gz . && cd ../..
+
+      - name: Publish Release to GitHub
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          $isTag = "${{ github.ref }}" -like "refs/tags/*"
-          $tag = if ($isTag) { "${{ github.ref_name }}" } else { "latest" }
-          $title = if ($isTag) { "Release ${{ github.ref_name }}" } else { "open-grn-converter (Latest Build)" }
-          
-          @"
-          Automated continuous release of **open-grn-converter** for Windows x64.
-          
-          - **Commit**: `${{ github.sha }}`
-          - **Branch**: `${{ github.ref_name }}`
-          
-          ### Download:
-          Download **open-grn-converter-windows-x64.zip** below, extract anywhere, and launch **grn_converter.exe** (no console shell spawned).
-          "@ | Out-File -FilePath release_notes.md -Encoding utf8
-          
-          if (-not $isTag) {
-              gh release delete latest --yes --cleanup-tag 2>$null || $true
-          }
-          
-          gh release create $tag "dist/open-grn-converter-windows-x64.zip" "dist/grn_converter.exe" --title $title --notes-file release_notes.md --latest
+          isTag="${{ startsWith(github.ref, 'refs/tags/') }}"
+          tag="${{ github.ref_name }}"
+          if [ "$isTag" != "true" ]; then
+            tag="latest"
+            title="open-grn-converter (Latest Build)"
+            gh release delete latest --yes --cleanup-tag 2>/dev/null || true
+          else
+            title="Release ${{ github.ref_name }}"
+          fi
+
+          cat << 'EOF' > release_notes.md
+          Automated continuous release of **open-grn-converter**.
+
+          - Commit: `${{ github.sha }}`
+          - Branch: `${{ github.ref_name }}`
+
+          ### Downloads:
+          - Windows x64: `open-grn-converter-windows-x64.zip`
+          - Linux x64: `open-grn-converter-linux-x64.tar.gz`
+          EOF
+
+          gh release create "$tag" \
+            release_assets/open-grn-converter-windows-x64.zip \
+            release_assets/open-grn-converter-linux-x64.tar.gz \
+            --title "$title" \
+            --notes-file release_notes.md \
+            --latest

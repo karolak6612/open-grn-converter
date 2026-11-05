@@ -61,7 +61,6 @@ static fs::path locate_viewer() {
     if (fs::is_regular_file(parent_viewer, ec)) {
         return parent_viewer;
     }
-
     return {};
 }
 

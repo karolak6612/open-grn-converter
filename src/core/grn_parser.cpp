@@ -688,6 +688,7 @@ static std::vector<GrnAnimation> decode_animations(
     const std::vector<GrnChunkNode>& roots,
     const std::vector<DataExtProps>& dexts,
     const std::vector<std::optional<int32_t>>& tc_list,
+    const std::vector<GrnBone>& bones,
     const std::vector<uint32_t>& all_offsets,
     uint32_t sec_end)
 {
@@ -723,6 +724,9 @@ static std::vector<GrnAnimation> decode_animations(
                 if (tc_idx >= 0 && static_cast<size_t>(tc_idx) < tc_list.size()) {
                     auto b_dext = tc_list[tc_idx];
                     bone_name = dext_lookup(dexts, b_dext, "__ObjectName");
+                }
+                if (bone_name.empty() && tc_idx >= 0 && static_cast<size_t>(tc_idx) < bones.size()) {
+                    bone_name = bones[tc_idx].name;
                 }
                 if (bone_name.empty()) bone_name = "Bone_" + std::to_string(channel_id);
 
@@ -781,6 +785,9 @@ static std::vector<GrnAnimation> decode_animations(
                     for (size_t f = 0; f < num_frames && p + FRAME <= data_len; ++f) {
                         float t = rF32(data + p);
                         track.times.push_back(t);
+                        track.translation_times.push_back(t);
+                        track.rotation_times.push_back(t);
+                        track.scale_shear_times.push_back(t);
                         max_time = std::max(max_time, t);
                         track.translations.push_back(rVec3(data + p + 4));
                         track.rotations.push_back(rVec4(data + p + 16));
@@ -899,7 +906,7 @@ std::optional<GrnModel> parse_grn_memory(const uint8_t* data, size_t size) {
 
     // Decode Animations
     auto tc_list = decode_transform_channels(sec_data, sec_len, model.root_nodes);
-    model.animations = decode_animations(sec_data, sec_len, model.root_nodes, dexts, tc_list, all_offsets, sec_end_u32);
+    model.animations = decode_animations(sec_data, sec_len, model.root_nodes, dexts, tc_list, model.bones, all_offsets, sec_end_u32);
 
     return model;
 }
