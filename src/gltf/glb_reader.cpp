@@ -930,6 +930,15 @@ std::optional<GrnModel> load_glb_memory(const uint8_t* data, size_t size, const 
                 b.position.y *= auto_s;
                 b.position.z *= auto_s;
             }
+            for (auto& a : model.animations) {
+                for (auto& tr : a.tracks) {
+                    for (auto& t : tr.translations) {
+                        t.x *= auto_s;
+                        t.y *= auto_s;
+                        t.z *= auto_s;
+                    }
+                }
+            }
         }
     }
 

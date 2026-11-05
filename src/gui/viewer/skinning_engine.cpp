@@ -201,13 +201,13 @@ void SkinningEngine::evaluate(float time_seconds) {
         for (size_t vi = 0; vi < mesh.vertices.size(); ++vi) {
             QVector3D origPos(mesh.vertices[vi].x, mesh.vertices[vi].y, mesh.vertices[vi].z);
             if (!canSkin || vi >= mesh.weights.size()) {
-                skinned[vi] = origPos;
+                skinned[vi] = origPos * scale_;
                 continue;
             }
 
             const auto& w = mesh.weights[vi];
             if (w.bone_indices.empty() || w.bone_weights.empty()) {
-                skinned[vi] = origPos;
+                skinned[vi] = origPos * scale_;
                 continue;
             }
 

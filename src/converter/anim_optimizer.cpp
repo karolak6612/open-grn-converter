@@ -567,8 +567,34 @@ AnimOptimizationStats optimize_animation(GrnAnimation& anim,
                 }
             }
             if (maxRotDeg < opts.min_rotation_deg && maxPosMotion <= opts.pos_tolerance) {
-                // Micro-jitter motion below threshold: omit track to keep 32-bit viewer within memory limits
-                continue;
+                bool matchesRest = false;
+                if (bone != nullptr) {
+                    bool posMatchesRest = tr.translations.empty() || (vec3Dist(tr.translations.front(), bone->position) <= opts.pos_tolerance);
+                    bool rotMatchesRest = tr.rotations.empty() || (quatDiff(tr.rotations.front(), bone->rotation) <= opts.rot_tolerance);
+                    bool scaleMatchesRest = tr.scale_shears.empty() || (scaleDiff(tr.scale_shears.front(), bone->scale_3x3) <= opts.scale_tolerance);
+                    matchesRest = posMatchesRest && rotMatchesRest && scaleMatchesRest;
+                }
+                if (matchesRest) {
+                    // Truly matches bind pose: omit track entirely to save memory
+                    continue;
+                } else {
+                    // Constant or micro-jitter non-rest pose: collapse to a single key at time 0 to preserve held pose
+                    if (tr.translations.size() > 1) {
+                        tr.translations.resize(1);
+                        if (!tr.translation_times.empty()) tr.translation_times = {0.0f};
+                    }
+                    if (tr.rotations.size() > 1) {
+                        tr.rotations.resize(1);
+                        if (!tr.rotation_times.empty()) tr.rotation_times = {0.0f};
+                    }
+                    if (tr.scale_shears.size() > 1) {
+                        tr.scale_shears.resize(1);
+                        if (!tr.scale_shear_times.empty()) tr.scale_shear_times = {0.0f};
+                    }
+                    if (!tr.times.empty()) {
+                        tr.times = {0.0f};
+                    }
+                }
             }
         }
 

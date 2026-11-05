@@ -331,12 +331,15 @@ void GrnAnimSampler::setAnimation(const GrnAnimation& anim, const std::vector<Gr
 
         // 1. Translations
         const auto& pos_times = !t.translation_times.empty() ? t.translation_times : t.times;
-        if (!pos_times.empty() && !t.translations.empty()) {
+        size_t pos_count = std::min(pos_times.size(), t.translations.size());
+        if (pos_count > 0) {
             ct.pos_mode = t.position_interp_mode;
-            ct.pos_times = buildPaddedTimes(pos_times);
+            std::vector<float> trimmed_pos_times(pos_times.begin(), pos_times.begin() + pos_count);
+            ct.pos_times = buildPaddedTimes(trimmed_pos_times);
             std::vector<float> flatPos;
-            flatPos.reserve(t.translations.size() * 3);
-            for (const auto& v : t.translations) {
+            flatPos.reserve(pos_count * 3);
+            for (size_t i = 0; i < pos_count; ++i) {
+                const auto& v = t.translations[i];
                 flatPos.push_back(v.x);
                 flatPos.push_back(v.y);
                 flatPos.push_back(v.z);
@@ -346,11 +349,14 @@ void GrnAnimSampler::setAnimation(const GrnAnimation& anim, const std::vector<Gr
 
         // 2. Rotations
         const auto& rot_times = !t.rotation_times.empty() ? t.rotation_times : t.times;
-        if (!rot_times.empty() && !t.rotations.empty()) {
+        size_t rot_count = std::min(rot_times.size(), t.rotations.size());
+        if (rot_count > 0) {
             ct.rot_mode = t.quaternion_interp_mode;
-            ct.rot_times = buildPaddedTimes(rot_times);
-            auto conditionedQuats = alignSourceRotationHemispheres(t.rotations);
-            filterSourceRotationSpikes(conditionedQuats, rot_times);
+            std::vector<float> trimmed_rot_times(rot_times.begin(), rot_times.begin() + rot_count);
+            ct.rot_times = buildPaddedTimes(trimmed_rot_times);
+            std::vector<Vec4> trimmed_quats(t.rotations.begin(), t.rotations.begin() + rot_count);
+            auto conditionedQuats = alignSourceRotationHemispheres(trimmed_quats);
+            filterSourceRotationSpikes(conditionedQuats, trimmed_rot_times);
 
             std::vector<float> flatRot;
             flatRot.reserve(conditionedQuats.size() * 4);
@@ -365,13 +371,15 @@ void GrnAnimSampler::setAnimation(const GrnAnimation& anim, const std::vector<Gr
 
         // 3. Scale / Shears
         const auto& scale_times = !t.scale_shear_times.empty() ? t.scale_shear_times : t.times;
-        if (!scale_times.empty() && !t.scale_shears.empty()) {
+        size_t scale_count = std::min(scale_times.size(), t.scale_shears.size());
+        if (scale_count > 0) {
             ct.scale_mode = t.scale_shear_interp_mode;
-            ct.scale_times = buildPaddedTimes(scale_times);
+            std::vector<float> trimmed_scale_times(scale_times.begin(), scale_times.begin() + scale_count);
+            ct.scale_times = buildPaddedTimes(trimmed_scale_times);
             std::vector<float> flatScale;
-            flatScale.reserve(t.scale_shears.size() * 9);
-            for (const auto& s : t.scale_shears) {
-                for (int k = 0; k < 9; ++k) flatScale.push_back(s[k]);
+            flatScale.reserve(scale_count * 9);
+            for (size_t i = 0; i < scale_count; ++i) {
+                for (int k = 0; k < 9; ++k) flatScale.push_back(t.scale_shears[i][k]);
             }
             ct.scale_values = buildPaddedValues(flatScale, 9);
         }
