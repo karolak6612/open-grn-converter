@@ -293,6 +293,12 @@ struct MainWindow::Impl {
             QString p = inputEdit->text().trimmed();
             if (p.isEmpty() || (QFileInfo::exists(p) && QFileInfo(p).isFile())) {
                 onInputPathChanged();
+            } else {
+                modelViewer->loadSourceModel(nullptr, QString());
+                if (sourceInfoWidget) sourceInfoWidget->clearSource();
+                if (boneInspectorWidget) boneInspectorWidget->setSourceModel(nullptr);
+                updateBadges();
+                updateActionState();
             }
         });
         inRow->addWidget(inputEdit, 1);

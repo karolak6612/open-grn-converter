@@ -193,17 +193,25 @@ ctest --preset release --output-on-failure
 
 ### Option B: Standard CMake CLI
 
-```bash
-# 1. Clone repository
-git clone https://github.com/karolak6612/open-grn-converter.git
-cd open-grn-converter
-
-# 2. Configure with CMake, vcpkg toolchain, and Qt prefix
-cmake -B build -S . \
-  -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+**PowerShell (Windows):**
+```powershell
+# 1. Configure with CMake, vcpkg toolchain, and Qt prefix
+cmake -B build -S . `
+  -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
   -DCMAKE_PREFIX_PATH="$env:QT_DIR"
 
-# 3. Build Release executable and test suite
+# 2. Build Release executable and test suite
+cmake --build build --config Release -j
+```
+
+**Bash (Linux / macOS):**
+```bash
+# 1. Configure with CMake, vcpkg toolchain, and system Qt
+cmake -B build -S . \
+  -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+  -DCMAKE_PREFIX_PATH="$QT_DIR"
+
+# 2. Build Release executable and test suite
 cmake --build build --config Release -j
 ```
 

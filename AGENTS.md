@@ -289,7 +289,7 @@ ctest --preset release --output-on-failure
 # Export loose textures instead of embedding in GLB
 .\build\Release\grn_converter.exe model.grn model.glb --no-embed-textures --texture-format png
 
-# Launch Dear ImGui GUI window explicitly
+# Launch Qt6 / Qlementine GUI window explicitly
 .\build\Release\grn_converter.exe --gui
 ```
 

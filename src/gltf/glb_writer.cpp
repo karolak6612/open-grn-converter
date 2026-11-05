@@ -359,12 +359,21 @@ std::vector<uint8_t> export_grn_to_glb_memory(const GrnModel& model, const GlbEx
     std::vector<Vec3> bone_node_trans(model.bones.size());
     std::vector<Vec4> bone_node_rot(model.bones.size());
 
+    // 0. Compute consistent effective parent per bone (only parents with a lower index are valid)
+    std::vector<int32_t> effective_parent(model.bones.size(), -1);
+    for (size_t bi = 0; bi < model.bones.size(); ++bi) {
+        int32_t p = model.bones[bi].parent_index;
+        if (p >= 0 && static_cast<size_t>(p) < bi && p != static_cast<int32_t>(bi)) {
+            effective_parent[bi] = p;
+        }
+    }
+
     // 1. Evaluate Granny rest world matrices
     for (size_t bi = 0; bi < model.bones.size(); ++bi) {
         const auto& b = model.bones[bi];
         Mat4x4 local_m = compose_grn_transform(b.position, b.rotation, b.scale_3x3);
-        int32_t p = b.parent_index;
-        if (p >= 0 && static_cast<size_t>(p) < bi && p != static_cast<int32_t>(bi)) {
+        int32_t p = effective_parent[bi];
+        if (p >= 0) {
             W_grn_rest[bi] = mat4_mul(W_grn_rest[p], local_m);
         } else {
             W_grn_rest[bi] = local_m;
@@ -392,8 +401,8 @@ std::vector<uint8_t> export_grn_to_glb_memory(const GrnModel& model, const GlbEx
     // 3. Build GLB Rest Local Transforms & Joint Nodes
     for (size_t bi = 0; bi < model.bones.size(); ++bi) {
         const auto& b = model.bones[bi];
-        int32_t p = b.parent_index;
-        bool is_root = (p < 0 || p == static_cast<int32_t>(bi) || static_cast<size_t>(p) >= model.bones.size());
+        int32_t p = effective_parent[bi];
+        bool is_root = (p < 0);
 
         Mat4x4 Local_glb;
         if (!is_root) {
@@ -430,8 +439,8 @@ std::vector<uint8_t> export_grn_to_glb_memory(const GrnModel& model, const GlbEx
 
     // Connect bone children
     for (size_t bi = 0; bi < model.bones.size(); ++bi) {
-        int32_t parent = model.bones[bi].parent_index;
-        if (parent >= 0 && static_cast<size_t>(parent) < model.bones.size() && parent != static_cast<int32_t>(bi)) {
+        int32_t parent = effective_parent[bi];
+        if (parent >= 0) {
             gltf["nodes"][joint_indices[parent]]["children"].push_back(joint_indices[bi]);
         }
     }
@@ -786,8 +795,8 @@ std::vector<uint8_t> export_grn_to_glb_memory(const GrnModel& model, const GlbEx
                         sampler.sampleBone(bi, b.position, b.rotation, b.scale_3x3, t, pos, rot, scale);
                         local_grn[bi] = compose_grn_transform(pos, rot, scale);
 
-                        int32_t p = b.parent_index;
-                        bool is_root = (p < 0 || p == static_cast<int32_t>(bi) || static_cast<size_t>(p) >= model.bones.size());
+                        int32_t p = effective_parent[bi];
+                        bool is_root = (p < 0);
                         if (!is_root) {
                             W_grn_anim[bi] = mat4_mul(W_grn_anim[p], local_grn[bi]);
                         } else {
@@ -833,7 +842,7 @@ std::vector<uint8_t> export_grn_to_glb_memory(const GrnModel& model, const GlbEx
                 // Add channels for each joint
                 for (size_t bi = 0; bi < model.bones.size(); ++bi) {
                     uint32_t node_idx = joint_indices[bi];
-                    bool is_root = (model.bones[bi].parent_index < 0 || model.bones[bi].parent_index == static_cast<int32_t>(bi));
+                    bool is_root = (effective_parent[bi] < 0);
                     bool has_track = sampler.hasTrackForBone(bi);
 
                     // Check translation motion

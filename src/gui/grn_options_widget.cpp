@@ -344,9 +344,9 @@ struct GrnOptionsWidget::Impl {
             for (const auto& animPath : externalAnims) {
                 auto* animItem = new QTreeWidgetItem(rootItem);
                 animItem->setIcon(0, makeThemedIcon(Icons16::Media_Play));
-                animItem->setText(0, QString::fromStdString(animPath.filename().string()));
-                animItem->setToolTip(0, QString::fromStdString(animPath.string()));
-                animItem->setData(0, Qt::UserRole, QString::fromStdString(animPath.string()));
+                animItem->setText(0, QString::fromStdWString(animPath.filename().wstring()));
+                animItem->setToolTip(0, QString::fromStdWString(animPath.wstring()));
+                animItem->setData(0, Qt::UserRole, QString::fromStdWString(animPath.wstring()));
                 animItem->setData(0, Qt::UserRole + 1, -1);
             }
         }

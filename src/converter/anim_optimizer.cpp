@@ -566,7 +566,14 @@ AnimOptimizationStats optimize_animation(GrnAnimation& anim,
                     maxPosMotion = std::max(maxPosMotion, vec3Dist(tr.translations[i], p0));
                 }
             }
-            if (maxRotDeg < opts.min_rotation_deg && maxPosMotion <= opts.pos_tolerance) {
+            float maxScaleMotion = 0.0f;
+            if (!tr.scale_shears.empty()) {
+                const auto& s0 = tr.scale_shears.front();
+                for (size_t i = 1; i < tr.scale_shears.size(); ++i) {
+                    maxScaleMotion = std::max(maxScaleMotion, scaleDiff(tr.scale_shears[i], s0));
+                }
+            }
+            if (maxRotDeg < opts.min_rotation_deg && maxPosMotion <= opts.pos_tolerance && maxScaleMotion <= opts.scale_tolerance) {
                 bool matchesRest = false;
                 if (bone != nullptr) {
                     bool posMatchesRest = tr.translations.empty() || (vec3Dist(tr.translations.front(), bone->position) <= opts.pos_tolerance);

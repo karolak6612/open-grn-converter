@@ -52,13 +52,11 @@ FetchContent_Declare(
     qlementine
     GIT_REPOSITORY "https://github.com/oclero/qlementine.git"
     GIT_TAG "7825161fce66ac5a49bc0ffe39ab13df5ff8ff4a"
-    GIT_SHALLOW TRUE
 )
 FetchContent_Declare(
     qlementine-icons
     GIT_REPOSITORY "https://github.com/oclero/qlementine-icons.git"
     GIT_TAG "e7cf96d0c60836b285f117cede9ed8c4113ebfa8"
-    GIT_SHALLOW TRUE
 )
 FetchContent_MakeAvailable(qlementine qlementine-icons)
 
