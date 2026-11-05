@@ -9,7 +9,7 @@
 #include "gltf/glb_reader.h"
 #include "converter/converter.h"
 #include "gui/viewer/camera.h"
-#include "gui/viewer/grn_anim_sampler.h"
+#include "converter/grn_anim_sampler.h"
 #include "gui/viewer/skinning_engine.h"
 #include <QGuiApplication>
 #include <QFont>

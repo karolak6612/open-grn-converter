@@ -1,7 +1,7 @@
 #pragma once
 
 #include "../../core/grn_types.h"
-#include "grn_anim_sampler.h"
+#include "../../converter/grn_anim_sampler.h"
 #include <QMatrix4x4>
 #include <QVector3D>
 #include <vector>

@@ -24,6 +24,22 @@
 
 namespace grn {
 
+static bool equals_ci(std::string_view a, std::string_view b) noexcept {
+    if (a.size() != b.size()) return false;
+    return std::equal(a.begin(), a.end(), b.begin(), [](char ca, char cb) {
+        return std::tolower(static_cast<unsigned char>(ca)) == std::tolower(static_cast<unsigned char>(cb));
+    });
+}
+
+static std::string to_lower_str(std::string_view s) {
+    std::string res;
+    res.reserve(s.size());
+    for (char c : s) {
+        res.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+    }
+    return res;
+}
+
 static void resolve_model_textures(GrnModel& model, const std::filesystem::path& model_path, const ConversionOptions& options) {
     std::vector<std::filesystem::path> search_dirs;
     std::error_code ec;
@@ -186,7 +202,7 @@ bool convert_file(const std::filesystem::path& input,
                     // Ensure track bone names match target bone names if needed
                     for (auto& track : a.tracks) {
                         for (const auto& tb : model->bones) {
-                            if (_stricmp(track.bone_name.c_str(), tb.name.c_str()) == 0) {
+                            if (equals_ci(track.bone_name, tb.name)) {
                                 track.bone_name = tb.name;
                                 break;
                             }
@@ -361,7 +377,8 @@ bool convert_file(const std::filesystem::path& input,
                 return true;
             };
 
-            std::unordered_set<std::string> used_anim_filenames;
+            std::unordered_set<std::string> used_anim_filenames_ci;
+            bool all_clips_ok = true;
             for (size_t ai = 0; ai < model->animations.size(); ++ai) {
                 const auto& anim = model->animations[ai];
                 std::string safe_anim_name = anim.name.empty() ? ("Anim_" + std::to_string(ai)) : anim.name;
@@ -374,7 +391,7 @@ bool convert_file(const std::filesystem::path& input,
                 std::string anim_base_name;
                 if (starts_with_ci(safe_anim_name, stem + "_") || starts_with_ci(safe_anim_name, stem + "-")) {
                     anim_base_name = safe_anim_name;
-                } else if (safe_anim_name == stem) {
+                } else if (equals_ci(safe_anim_name, stem)) {
                     anim_base_name = stem + "_anim";
                 } else {
                     anim_base_name = stem + "_" + safe_anim_name;
@@ -382,10 +399,10 @@ bool convert_file(const std::filesystem::path& input,
 
                 std::string unique_anim_filename = anim_base_name;
                 int counter = 1;
-                while (used_anim_filenames.count(unique_anim_filename) || unique_anim_filename == stem) {
+                while (used_anim_filenames_ci.count(to_lower_str(unique_anim_filename)) || equals_ci(unique_anim_filename, stem)) {
                     unique_anim_filename = anim_base_name + "_" + std::to_string(counter++);
                 }
-                used_anim_filenames.insert(unique_anim_filename);
+                used_anim_filenames_ci.insert(to_lower_str(unique_anim_filename));
 
                 std::filesystem::path anim_out = out_dir / (unique_anim_filename + ".grn");
 
@@ -396,12 +413,22 @@ bool convert_file(const std::filesystem::path& input,
                 float prog = 0.6f + 0.4f * (static_cast<float>(ai + 1) / static_cast<float>(model->animations.size()));
                 if (callback) callback(anim.name, prog, true,
                                        "Writing animation GRN: " + anim_out.filename().string() + " (" + std::to_string(anim.tracks.size()) + " tracks)");
-                write_grn_file(anim_out, anim_model);
+                bool ok_clip = write_grn_file(anim_out, anim_model);
+                if (!ok_clip) {
+                    all_clips_ok = false;
+                    if (callback) callback(anim.name, prog, false, "Failed writing animation GRN: " + anim_out.filename().string());
+                }
             }
 
-            if (callback) callback(out_path.filename().string(), 1.0f, true,
-                "Successfully converted GLB -> GRN (Model + " + std::to_string(model->animations.size()) + " animation files)");
-            return true;
+            if (all_clips_ok) {
+                if (callback) callback(out_path.filename().string(), 1.0f, true,
+                    "Successfully converted GLB -> GRN (Model + " + std::to_string(model->animations.size()) + " animation files)");
+                return true;
+            } else {
+                if (callback) callback(out_path.filename().string(), 1.0f, false,
+                    "Failed to write one or more split animation clips");
+                return false;
+            }
         } else {
             if (callback) callback(input.filename().string(), 0.6f, true, "Serializing GRN container: " + out_path.string());
 

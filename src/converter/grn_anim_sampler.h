@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../../core/grn_types.h"
+#include "../core/grn_types.h"
 #include <vector>
 #include <array>
 #include <string>

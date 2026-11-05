@@ -51,12 +51,14 @@ set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(
     qlementine
     GIT_REPOSITORY "https://github.com/oclero/qlementine.git"
-    GIT_TAG "master"
+    GIT_TAG "7825161fce66ac5a49bc0ffe39ab13df5ff8ff4a"
+    GIT_SHALLOW TRUE
 )
 FetchContent_Declare(
     qlementine-icons
     GIT_REPOSITORY "https://github.com/oclero/qlementine-icons.git"
-    GIT_TAG "master"
+    GIT_TAG "e7cf96d0c60836b285f117cede9ed8c4113ebfa8"
+    GIT_SHALLOW TRUE
 )
 FetchContent_MakeAvailable(qlementine qlementine-icons)
 
@@ -74,7 +76,7 @@ set(GRN_CORE_SOURCES
     src/converter/converter.cpp
     src/converter/mesh_optimizer.cpp
     src/converter/anim_optimizer.cpp
-    src/gui/viewer/grn_anim_sampler.cpp
+    src/converter/grn_anim_sampler.cpp
 )
 
 set(GRN_CORE_HEADERS
@@ -90,7 +92,7 @@ set(GRN_CORE_HEADERS
     src/converter/converter.h
     src/converter/mesh_optimizer.h
     src/converter/anim_optimizer.h
-    src/gui/viewer/grn_anim_sampler.h
+    src/converter/grn_anim_sampler.h
 )
 
 add_library(grn_core STATIC
@@ -124,7 +126,6 @@ set(GRN_APP_SOURCES
     src/gui/glb_options_widget.cpp
     src/gui/log_drawer.cpp
     src/gui/viewer/camera.cpp
-    src/gui/viewer/grn_anim_sampler.cpp
     src/gui/viewer/skinning_engine.cpp
     src/gui/viewer/shader_gl.cpp
     src/gui/viewer/font_atlas.cpp
@@ -150,7 +151,6 @@ set(GRN_APP_HEADERS
     src/gui/source_info_widget.h
     src/gui/target_info_widget.h
     src/gui/viewer/camera.h
-    src/gui/viewer/grn_anim_sampler.h
     src/gui/viewer/skinning_engine.h
     src/gui/viewer/shader_gl.h
     src/gui/viewer/font_atlas.h

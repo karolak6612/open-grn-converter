@@ -1,6 +1,6 @@
 #include "glb_writer.h"
 #include "../codecs/tga_png.h"
-#include "../gui/viewer/grn_anim_sampler.h"
+#include "../converter/grn_anim_sampler.h"
 #include <nlohmann/json.hpp>
 #include <fstream>
 #include <iostream>
